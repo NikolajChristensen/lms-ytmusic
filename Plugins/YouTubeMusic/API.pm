@@ -113,4 +113,24 @@ sub browseRadio {
     _get("/radio?videoId=$video_id", $cb);
 }
 
+sub getLibraryLiked {
+    my ($class, $cb) = @_;
+    _get("/library/liked", $cb);
+}
+
+sub getLibraryPlaylists {
+    my ($class, $cb) = @_;
+    _get("/library/playlists", $cb);
+}
+
+sub getLibrarySongs {
+    my ($class, $cb) = @_;
+    _get("/library/songs", $cb);
+}
+
+sub getHistory {
+    my ($class, $cb) = @_;
+    _get("/library/history", $cb);
+}
+
 1;

@@ -127,6 +127,7 @@ sub _start_proxy {
         push @win_args, '--node',     $prefs->get('path_node')   if $prefs->get('path_node');
         push @win_args, '--log-file',        $prefs->get('log_path')         if $prefs->get('log_path');
         push @win_args, '--no-node-worker'                                          if $prefs->get('disable_node_worker');
+        push @win_args, '--ytm-cookie', $prefs->get('ytm_cookie')  if $prefs->get('ytm_cookie');
         my $pid = system(1, $python, $script, '--port', $port, '--log-level', 'WARNING', '--codec', $codec, @win_args);
         if (!$pid) {
             $log->error("system(1,...) failed: $!");
@@ -148,6 +149,7 @@ sub _start_proxy {
             push @extra_args, '--node',     $prefs->get('path_node')   if $prefs->get('path_node');
             push @extra_args, '--log-file',        $prefs->get('log_path')         if $prefs->get('log_path');
             push @extra_args, '--no-node-worker'                                          if $prefs->get('disable_node_worker');
+            push @extra_args, '--ytm-cookie', $prefs->get('ytm_cookie')  if $prefs->get('ytm_cookie');
             exec($python, $script, '--port', $port, '--log-level', 'WARNING', '--codec', $codec, @extra_args) or do {
                 $log->error("exec failed: $!");
                 exit 1;
@@ -543,6 +545,14 @@ sub _top_level {
         },
     );
 
+    # Add My Library section if authenticated
+    if ($prefs->get('ytm_cookie')) {
+        push @items, {
+            name => 'My Library',
+            url  => \&_my_library_menu,
+        };
+    }
+
     $callback->({ items => \@items });
 }
 
@@ -740,6 +750,75 @@ sub _podcasts_menu {
             }
         } @$sections;
         $callback->({ items => \@items });
+    });
+}
+
+sub _my_library_menu {
+    my ($client, $callback) = @_;
+    $callback->({ items => [
+        {
+            name => 'Liked Songs',
+            url  => \&_liked_songs_menu,
+        },
+        {
+            name => 'My Playlists',
+            url  => \&_library_playlists_menu,
+        },
+        {
+            name => 'Library Songs',
+            url  => \&_library_songs_menu,
+        },
+        {
+            name => 'History',
+            url  => \&_history_menu,
+        },
+    ]});
+}
+
+sub _liked_songs_menu {
+    my ($client, $callback) = @_;
+    Plugins::YouTubeMusic::API->getLibraryLiked(sub {
+        my $data = shift;
+        unless ($data && ref $data eq 'HASH') {
+            return $callback->({ items => [] });
+        }
+        if ($data->{error} && $data->{error} eq 'not_authenticated') {
+            return $callback->({ items => [{ name => 'Not authenticated — please add your YouTube Music cookie in plugin settings', url => sub { $_[1]->({ items => [] }) } }] });
+        }
+        $callback->({ items => _items_to_menu($client, $data->{items} // [], { playall => 1 }), playall => 1 });
+    });
+}
+
+sub _library_playlists_menu {
+    my ($client, $callback) = @_;
+    Plugins::YouTubeMusic::API->getLibraryPlaylists(sub {
+        my $data = shift;
+        unless ($data && ref $data eq 'HASH') {
+            return $callback->({ items => [] });
+        }
+        $callback->({ items => _items_to_menu($client, $data->{items} // []) });
+    });
+}
+
+sub _library_songs_menu {
+    my ($client, $callback) = @_;
+    Plugins::YouTubeMusic::API->getLibrarySongs(sub {
+        my $data = shift;
+        unless ($data && ref $data eq 'HASH') {
+            return $callback->({ items => [] });
+        }
+        $callback->({ items => _items_to_menu($client, $data->{items} // [], { playall => 1 }), playall => 1 });
+    });
+}
+
+sub _history_menu {
+    my ($client, $callback) = @_;
+    Plugins::YouTubeMusic::API->getHistory(sub {
+        my $data = shift;
+        unless ($data && ref $data eq 'HASH') {
+            return $callback->({ items => [] });
+        }
+        $callback->({ items => _items_to_menu($client, $data->{items} // [], { playall => 1 }), playall => 1 });
     });
 }
 

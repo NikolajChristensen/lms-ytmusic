@@ -40,6 +40,43 @@ import tempfile
 import os
 import threading
 
+# ── ytmusicapi (optional, for authenticated YouTube Music access) ─────────────
+_ytm_auth = None   # YTMusic instance, None if not authenticated
+_ytm_cookie = None # current cookie string
+
+def _get_ytm_auth():
+    """Return authenticated YTMusic instance or None."""
+    return _ytm_auth
+
+def _init_ytm_auth(cookie_str):
+    """Initialize ytmusicapi with browser cookie string."""
+    global _ytm_auth, _ytm_cookie
+    if not cookie_str or not cookie_str.strip():
+        _ytm_auth = None
+        _ytm_cookie = None
+        return False
+    try:
+        from ytmusicapi import YTMusic
+        from ytmusicapi.auth.types import AuthType
+        # Use browser auth with cookie string
+        import tempfile, json as _json
+        # Write cookie to temp headers file
+        headers = {"Cookie": cookie_str.strip(), "User-Agent": "Mozilla/5.0"}
+        tmp = tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False)
+        _json.dump(headers, tmp)
+        tmp.close()
+        _ytm_auth = YTMusic(tmp.name)
+        _ytm_cookie = cookie_str.strip()
+        os.unlink(tmp.name)
+        logging.info("ytmusicapi authenticated successfully")
+        return True
+    except Exception as e:
+        logging.warning("ytmusicapi auth failed: %s", e)
+        _ytm_auth = None
+        _ytm_cookie = None
+        return False
+
+
 _CACHE = {}
 _CACHE_TTL = 120  # seconds
 
@@ -340,6 +377,115 @@ def search(query, type_filter="songs"):
 
     _cache_set(cache_key, results)
     return results
+
+# ── Authenticated library endpoints ──────────────────────────────────────────
+
+def get_liked_songs(limit=100):
+    """Get user's liked songs (requires auth)."""
+    yt = _get_ytm_auth()
+    if not yt:
+        return {"error": "not_authenticated", "items": []}
+    try:
+        result = yt.get_liked_songs(limit=limit)
+        items = []
+        for track in result.get("tracks", []):
+            vid = track.get("videoId")
+            if not vid:
+                continue
+            items.append({
+                "type": "song",
+                "title": track.get("title", ""),
+                "artist": track.get("artists", [{}])[0].get("name", "") if track.get("artists") else "",
+                "album": track.get("album", {}).get("name", "") if track.get("album") else "",
+                "duration": track.get("duration_seconds", 0),
+                "videoId": vid,
+                "thumbnail": track.get("thumbnails", [{}])[-1].get("url", "") if track.get("thumbnails") else "",
+                "url": f"ytm://{vid}",
+            })
+        return {"items": items}
+    except Exception as e:
+        logging.warning("get_liked_songs failed: %s", e)
+        return {"error": str(e), "items": []}
+
+def get_library_playlists():
+    """Get user's personal playlists (requires auth)."""
+    yt = _get_ytm_auth()
+    if not yt:
+        return {"error": "not_authenticated", "items": []}
+    try:
+        playlists = yt.get_library_playlists(limit=50)
+        items = []
+        for pl in playlists:
+            bid = pl.get("playlistId")
+            if not bid:
+                continue
+            items.append({
+                "type": "playlist",
+                "title": pl.get("title", ""),
+                "artist": "",
+                "count": pl.get("count", ""),
+                "thumbnail": pl.get("thumbnails", [{}])[-1].get("url", "") if pl.get("thumbnails") else "",
+                "browseId": f"VL{bid}",
+                "url": f"ytmplaylist://VL{bid}",
+            })
+        return {"items": items}
+    except Exception as e:
+        logging.warning("get_library_playlists failed: %s", e)
+        return {"error": str(e), "items": []}
+
+def get_history():
+    """Get user's listening history (requires auth)."""
+    yt = _get_ytm_auth()
+    if not yt:
+        return {"error": "not_authenticated", "items": []}
+    try:
+        result = yt.get_history()
+        items = []
+        for track in result:
+            vid = track.get("videoId")
+            if not vid:
+                continue
+            items.append({
+                "type": "song",
+                "title": track.get("title", ""),
+                "artist": track.get("artists", [{}])[0].get("name", "") if track.get("artists") else "",
+                "album": track.get("album", {}).get("name", "") if track.get("album") else "",
+                "duration": track.get("duration_seconds", 0),
+                "videoId": vid,
+                "thumbnail": track.get("thumbnails", [{}])[-1].get("url", "") if track.get("thumbnails") else "",
+                "url": f"ytm://{vid}",
+            })
+        return {"items": items}
+    except Exception as e:
+        logging.warning("get_history failed: %s", e)
+        return {"error": str(e), "items": []}
+
+def get_library_songs(limit=100):
+    """Get user's library songs (requires auth)."""
+    yt = _get_ytm_auth()
+    if not yt:
+        return {"error": "not_authenticated", "items": []}
+    try:
+        result = yt.get_library_songs(limit=limit)
+        items = []
+        for track in result.get("tracks", []):
+            vid = track.get("videoId")
+            if not vid:
+                continue
+            items.append({
+                "type": "song",
+                "title": track.get("title", ""),
+                "artist": track.get("artists", [{}])[0].get("name", "") if track.get("artists") else "",
+                "album": track.get("album", {}).get("name", "") if track.get("album") else "",
+                "duration": track.get("duration_seconds", 0),
+                "videoId": vid,
+                "thumbnail": track.get("thumbnails", [{}])[-1].get("url", "") if track.get("thumbnails") else "",
+                "url": f"ytm://{vid}",
+            })
+        return {"items": items}
+    except Exception as e:
+        logging.warning("get_library_songs failed: %s", e)
+        return {"error": str(e), "items": []}
 
 def browse_home():
     cached = _cache_get("home")
@@ -1972,6 +2118,37 @@ class _Handler(BaseHTTPRequestHandler):
                     return self._error("Missing videoId", 400)
                 self._send_json(get_song_info(vid))
 
+            elif path == "/library/liked":
+                self._send_json(get_liked_songs())
+
+            elif path == "/library/playlists":
+                self._send_json(get_library_playlists())
+
+            elif path == "/library/songs":
+                self._send_json(get_library_songs())
+
+            elif path == "/library/history":
+                self._send_json(get_history())
+
+            elif path == "/auth/status":
+                yt = _get_ytm_auth()
+                self._send_json({"authenticated": yt is not None})
+
+            elif path == "/auth/init":
+                cookie = p("cookie") or ""
+                ok = _init_ytm_auth(cookie)
+                self._send_json({"success": ok})
+
+            elif path == "/auth/reload":
+                # Re-read cookie from request and reinitialize
+                import urllib.parse as _urlparse
+                body_len = int(self.headers.get('Content-Length', 0))
+                body = self.rfile.read(body_len).decode('utf-8') if body_len else ''
+                params = dict(_urlparse.parse_qsl(body))
+                cookie = params.get('cookie', '')
+                ok = _init_ytm_auth(cookie)
+                self._send_json({"success": ok, "authenticated": ok})
+
             elif path.startswith("/stream/"):
                 vid = path[len("/stream/"):]
                 if not vid:
@@ -2203,6 +2380,7 @@ if __name__ == "__main__":
     ap.add_argument("--node",      default="", help="Override path to node binary")
     ap.add_argument("--log-file",      default="", help="Path to log file (default: BIN_DIR/ytmproxy.log)")
     ap.add_argument("--no-node-worker", action="store_true", help="Disable persistent Node worker (saves ~140MB RAM)")
+    ap.add_argument("--ytm-cookie", default="", help="YouTube Music browser cookie for authenticated access")
     args = ap.parse_args()
     # Apply path overrides before run()
     if args.ytdlp and os.path.isfile(args.ytdlp):
@@ -2214,4 +2392,6 @@ if __name__ == "__main__":
     if args.node and os.path.isfile(args.node):
         os.environ['YTM_NODE_OVERRIDE'] = args.node
         logging.info("node path override: %s", args.node)
+    if args.ytm_cookie:
+        _init_ytm_auth(args.ytm_cookie)
     run(args.port, args.log_level, args.codec, args.log_file, args.no_node_worker)

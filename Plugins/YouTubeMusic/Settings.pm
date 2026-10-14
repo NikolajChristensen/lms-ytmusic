@@ -6,6 +6,8 @@ use base qw(Slim::Web::Settings);
 
 use Slim::Utils::Log;
 use Slim::Utils::Prefs;
+use Slim::Networking::SimpleAsyncHTTP;
+use URI::Escape;
 
 my $prefs = preferences('plugin.youtubemusic');
 my $log   = Slim::Utils::Log->addLogCategory({
@@ -18,7 +20,7 @@ sub name { 'PLUGIN_YOUTUBEMUSIC' }
 
 sub page { 'plugins/YouTubeMusic/settings/basic.html' }
 
-sub prefs { return ($prefs, qw(proxy_port autoplay codec path_python path_ytdlp path_ffmpeg path_node log_path disable_node_worker)) }
+sub prefs { return ($prefs, qw(proxy_port autoplay codec path_python path_ytdlp path_ffmpeg path_node log_path disable_node_worker ytm_cookie)) }
 
 sub handler {
     my ($class, $client, $params) = @_;
@@ -31,6 +33,19 @@ sub handler {
 
         # Save autoplay setting
         $prefs->set('autoplay', ($params->{pref_autoplay} // $params->{autoplay}) ? 1 : 0);
+
+        # Save YouTube Music cookie (optional authentication)
+        my $cookie = $params->{pref_ytm_cookie} // '';
+        $cookie =~ s/^\s+|\s+$//g;  # trim whitespace
+        $prefs->set('ytm_cookie', $cookie);
+
+        # Notify proxy to reload auth without restart
+        my $port = $prefs->get('proxy_port') || 9876;
+        my $ua = Slim::Networking::SimpleAsyncHTTP->new(sub {}, sub {});
+        my $encoded = URI::Escape::uri_escape($cookie);
+        $ua->post("http://127.0.0.1:$port/auth/reload",
+            'Content-Type' => 'application/x-www-form-urlencoded',
+            "cookie=$encoded");
         # Save codec setting
         my $codec = $params->{pref_codec} || $params->{codec} || 'auto';
         $codec = 'auto' unless grep { $_ eq $codec } qw(auto mp3 flac aac);

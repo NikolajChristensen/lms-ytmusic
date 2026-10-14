@@ -120,6 +120,17 @@
     <input type="checkbox" name="pref_autoplay" id="pref_autoplay" value="1" [% IF pref_autoplay %]checked[% END %] />
     <label for="pref_autoplay">Enable autoplay (add similar songs when queue ends)</label>
   [% END %]
+  [% WRAPPER setting title="YouTube Music Account (Optional)" desc="Authenticate with your YouTube Music account to access your personal library, liked songs, and playlists. Paste your browser cookie here. To get your cookie: open music.youtube.com in Chrome, press F12, go to Network tab, reload the page, click the first request, find the Cookie header under Request Headers, and copy the full value." %]
+    <textarea name="pref_ytm_cookie" id="ytm_cookie_field" rows="4"
+              style="width:100%;font-family:monospace;font-size:0.8em;resize:vertical;"
+              placeholder="Paste your music.youtube.com cookie here (optional). Leave empty to use without authentication.">[% prefs.ytm_cookie | html %]</textarea>
+    [% IF prefs.ytm_cookie %]
+    <span style="color:green;font-weight:bold;">✓ Cookie configured — My Library features enabled</span>
+    [% ELSE %]
+    <span style="color:#888;">No cookie set — browsing public content only</span>
+    [% END %]
+  [% END %]
+
   [% WRAPPER setting title="PLUGIN_YOUTUBEMUSIC_PROXY_PORT" desc="PLUGIN_YOUTUBEMUSIC_PROXY_PORT_DESC" %]
     <input type="number" name="pref_proxy_port"
            id="ytm_proxy_port"
