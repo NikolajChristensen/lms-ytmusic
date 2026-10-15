@@ -4,14 +4,14 @@
     <title lang="EN">YouTube Music for LMS</title>
   </details>
   <plugins>
-    <plugin name="YouTubeMusic" version="1.4.3" minTarget="9.0" maxTarget="*">
+    <plugin name="YouTubeMusic" version="1.4.4" minTarget="9.0" maxTarget="*">
       <title lang="EN">YouTube Music</title>
       <desc lang="EN">Browse, search, and stream YouTube Music to your Squeezebox players.</desc>
-      <changes lang="EN">Auto-install ytmusicapi Python library when authentication is first used. Previously the library had to be manually installed for the LMS service user.</changes>
+      <changes lang="EN">Fix ytmusicapi auto-install on older Linux systems (e.g. Linux Mint 21.3) where --break-system-packages is not supported. Falls back to --user install.</changes>
       <creator>schmij97</creator>
       <category>musicservices</category>
-      <url>https://github.com/schmij97/lms-ytmusic/releases/download/v1.4.3/YouTubeMusic-1.4.3.zip</url>
-      <sha>6cfbef131100af9ea9db2fa19b8ff69b2d8a228d</sha>
+      <url>https://github.com/schmij97/lms-ytmusic/releases/download/v1.4.4/YouTubeMusic-1.4.4.zip</url>
+      <sha>9b57c29e8d28c848c0d7e441e94c1e690b1260e3</sha>
     </plugin>
   </plugins>
 </extensions>

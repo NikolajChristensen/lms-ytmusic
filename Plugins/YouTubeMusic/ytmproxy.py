@@ -61,11 +61,19 @@ def _init_ytm_auth(headers_raw):
             from ytmusicapi import YTMusic, setup
         except ImportError:
             logging.info("ytmusicapi not found, installing...")
-            subprocess.run(
-                [sys.executable, "-m", "pip", "install", "ytmusicapi",
-                 "--break-system-packages", "--quiet"],
-                check=True, timeout=120
-            )
+            # Try with --break-system-packages first (Python 3.11+), fall back without it
+            try:
+                subprocess.run(
+                    [sys.executable, "-m", "pip", "install", "ytmusicapi",
+                     "--break-system-packages", "--quiet"],
+                    check=True, timeout=120
+                )
+            except subprocess.CalledProcessError:
+                subprocess.run(
+                    [sys.executable, "-m", "pip", "install", "ytmusicapi",
+                     "--user", "--quiet"],
+                    check=True, timeout=120
+                )
             from ytmusicapi import YTMusic, setup
             logging.info("ytmusicapi installed successfully")
         from ytmusicapi import YTMusic, setup
