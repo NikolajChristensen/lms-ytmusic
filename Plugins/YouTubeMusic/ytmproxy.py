@@ -48,26 +48,19 @@ def _get_ytm_auth():
     """Return authenticated YTMusic instance or None."""
     return _ytm_auth
 
-def _init_ytm_auth(cookie_str):
-    """Initialize ytmusicapi with browser cookie string."""
+def _init_ytm_auth(headers_raw):
+    """Initialize ytmusicapi with raw browser headers string."""
     global _ytm_auth, _ytm_cookie
-    if not cookie_str or not cookie_str.strip():
+    if not headers_raw or not headers_raw.strip():
         _ytm_auth = None
         _ytm_cookie = None
         return False
     try:
-        from ytmusicapi import YTMusic
-        from ytmusicapi.auth.types import AuthType
-        # Use browser auth with cookie string
-        import tempfile, json as _json
-        # Write cookie to temp headers file
-        headers = {"Cookie": cookie_str.strip(), "User-Agent": "Mozilla/5.0"}
-        tmp = tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False)
-        _json.dump(headers, tmp)
-        tmp.close()
-        _ytm_auth = YTMusic(tmp.name)
-        _ytm_cookie = cookie_str.strip()
-        os.unlink(tmp.name)
+        from ytmusicapi import YTMusic, setup
+        # setup() converts raw headers to the format ytmusicapi needs
+        auth_str = setup(headers_raw=headers_raw.strip())
+        _ytm_auth = YTMusic(auth_str)
+        _ytm_cookie = headers_raw.strip()
         logging.info("ytmusicapi authenticated successfully")
         return True
     except Exception as e:

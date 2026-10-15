@@ -4,14 +4,14 @@
     <title lang="EN">YouTube Music for LMS</title>
   </details>
   <plugins>
-    <plugin name="YouTubeMusic" version="1.3.99" minTarget="9.0" maxTarget="*">
+    <plugin name="YouTubeMusic" version="1.4.0" minTarget="9.0" maxTarget="*">
       <title lang="EN">YouTube Music</title>
       <desc lang="EN">Browse, search, and stream YouTube Music to your Squeezebox players.</desc>
-      <changes lang="EN">Add optional YouTube Music account authentication. Paste your browser cookie in Settings to unlock My Library — Liked Songs, personal playlists, library songs, and listening history. Works without authentication for all existing features.</changes>
+      <changes lang="EN">v1.4.0: Add optional YouTube Music account authentication. Paste your browser request headers in Settings to unlock My Library — Liked Songs, personal playlists, library songs, and listening history. All existing features work without authentication.</changes>
       <creator>schmij97</creator>
       <category>musicservices</category>
-      <url>https://github.com/schmij97/lms-ytmusic/releases/download/v1.3.99/YouTubeMusic-1.3.99.zip</url>
-      <sha>ec3e79acdc4203a38b78c612b3230920b02862a6</sha>
+      <url>https://github.com/schmij97/lms-ytmusic/releases/download/v1.4.0/YouTubeMusic-1.4.0.zip</url>
+      <sha>e02550ef0d4960aa6d57d019774c43e45545a775</sha>
     </plugin>
   </plugins>
 </extensions>
