@@ -783,7 +783,7 @@ sub _liked_songs_menu {
             return $callback->({ items => [] });
         }
         if ($data->{error} && $data->{error} eq 'not_authenticated') {
-            return $callback->({ items => [{ name => 'Not authenticated — please add your YouTube Music cookie in plugin settings', url => sub { $_[1]->({ items => [] }) } }] });
+            return \$callback->({ items => [{ name => 'Not authenticated - please add your YouTube Music headers in plugin settings', url => sub { \$_[1]->({ items => [] }) } }] });
         }
         $callback->({ items => _items_to_menu($client, $data->{items} // [], { playall => 1 }), playall => 1 });
     });

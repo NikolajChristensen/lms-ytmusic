@@ -125,9 +125,9 @@
               style="width:100%;font-family:monospace;font-size:0.8em;resize:vertical;"
               placeholder="Paste your full request headers here (optional). Leave empty to use without authentication. Headers should include Cookie:, x-goog-authuser:, authorization: and other YouTube headers.">[% prefs.ytm_cookie | html %]</textarea>
     [% IF prefs.ytm_cookie %]
-    <span style="color:green;font-weight:bold;">✓ Cookie configured — My Library features enabled</span>
+    <span style="color:green;font-weight:bold;">Headers configured - My Library features enabled</span>
     [% ELSE %]
-    <span style="color:#888;">No cookie set — browsing public content only</span>
+    <span style="color:#888;">No headers set - browsing public content only</span>
     [% END %]
   [% END %]
 
