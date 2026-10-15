@@ -4,14 +4,14 @@
     <title lang="EN">YouTube Music for LMS</title>
   </details>
   <plugins>
-    <plugin name="YouTubeMusic" version="1.4.1" minTarget="9.0" maxTarget="*">
+    <plugin name="YouTubeMusic" version="1.4.2" minTarget="9.0" maxTarget="*">
       <title lang="EN">YouTube Music</title>
       <desc lang="EN">Browse, search, and stream YouTube Music to your Squeezebox players.</desc>
-      <changes lang="EN">Fix UTF-8 display issue in settings page and Not authenticated message. No functional changes.</changes>
+      <changes lang="EN">Fix authentication not working — proxy was rejecting POST requests. Switched auth reload to GET request. Settings page now correctly notifies proxy when headers are saved.</changes>
       <creator>schmij97</creator>
       <category>musicservices</category>
-      <url>https://github.com/schmij97/lms-ytmusic/releases/download/v1.4.1/YouTubeMusic-1.4.1.zip</url>
-      <sha>128332af74fcf4950538ab9bb4fa45b88c7c4e43</sha>
+      <url>https://github.com/schmij97/lms-ytmusic/releases/download/v1.4.2/YouTubeMusic-1.4.2.zip</url>
+      <sha>6da07e787222a36c87ef028e03d388117800b8d6</sha>
     </plugin>
   </plugins>
 </extensions>

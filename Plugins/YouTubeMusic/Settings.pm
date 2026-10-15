@@ -43,9 +43,7 @@ sub handler {
         my $port = $prefs->get('proxy_port') || 9876;
         my $ua = Slim::Networking::SimpleAsyncHTTP->new(sub {}, sub {});
         my $encoded = URI::Escape::uri_escape($cookie);
-        $ua->post("http://127.0.0.1:$port/auth/reload",
-            'Content-Type' => 'application/x-www-form-urlencoded',
-            "cookie=$encoded");
+        $ua->get("http://127.0.0.1:$port/auth/reload?headers=$encoded");
         # Save codec setting
         my $codec = $params->{pref_codec} || $params->{codec} || 'auto';
         $codec = 'auto' unless grep { $_ eq $codec } qw(auto mp3 flac aac);

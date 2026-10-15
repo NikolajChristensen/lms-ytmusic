@@ -2133,12 +2133,8 @@ class _Handler(BaseHTTPRequestHandler):
                 self._send_json({"success": ok})
 
             elif path == "/auth/reload":
-                # Re-read cookie from request and reinitialize
-                import urllib.parse as _urlparse
-                body_len = int(self.headers.get('Content-Length', 0))
-                body = self.rfile.read(body_len).decode('utf-8') if body_len else ''
-                params = dict(_urlparse.parse_qsl(body))
-                cookie = params.get('cookie', '')
+                # Reload auth from query param - GET request
+                cookie = p("headers") or p("cookie") or ""
                 ok = _init_ytm_auth(cookie)
                 self._send_json({"success": ok, "authenticated": ok})
 
