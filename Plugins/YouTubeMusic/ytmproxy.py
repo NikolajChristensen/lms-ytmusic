@@ -56,6 +56,18 @@ def _init_ytm_auth(headers_raw):
         _ytm_cookie = None
         return False
     try:
+        # Auto-install ytmusicapi if not available
+        try:
+            from ytmusicapi import YTMusic, setup
+        except ImportError:
+            logging.info("ytmusicapi not found, installing...")
+            subprocess.run(
+                [sys.executable, "-m", "pip", "install", "ytmusicapi",
+                 "--break-system-packages", "--quiet"],
+                check=True, timeout=120
+            )
+            from ytmusicapi import YTMusic, setup
+            logging.info("ytmusicapi installed successfully")
         from ytmusicapi import YTMusic, setup
         # setup() converts raw headers to the format ytmusicapi needs
         auth_str = setup(headers_raw=headers_raw.strip())
