@@ -833,8 +833,11 @@ sub _library_home_sections {
     my $data = shift;
     return { items => [{ name => 'Could not load YouTube Music home', type => 'text' }] }
         unless $data && ref $data eq 'HASH';
+    my $error = $data->{error} // '';
     return { items => [{ name => 'Not authenticated - please add your YouTube Music headers in plugin settings', type => 'text' }] }
-        if ($data->{error} // '') eq 'not_authenticated';
+        if $error eq 'not_authenticated';
+    return { items => [{ name => "Could not load YouTube Music home: $error", type => 'text' }] }
+        if $error;
     return $data->{sections} || [];
 }
 
