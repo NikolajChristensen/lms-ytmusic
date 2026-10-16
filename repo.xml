@@ -4,14 +4,14 @@
     <title lang="EN">YouTube Music for LMS (NikolajChristensen fork)</title>
   </details>
   <plugins>
-    <plugin name="YouTubeMusic" version="1.4.8.1" minTarget="9.0" maxTarget="*">
+    <plugin name="YouTubeMusic" version="1.4.8.2" minTarget="9.0" maxTarget="*">
       <title lang="EN">YouTube Music</title>
       <desc lang="EN">Browse, search, and stream YouTube Music to your Squeezebox players.</desc>
-      <changes lang="EN">Based on upstream 1.4.8, which includes all of this fork's fixes. Unlike upstream 1.4.8, installs from Lyrion (correct SHA-1 checksum).</changes>
+      <changes lang="EN">Fix My Library for brand accounts (a YouTube channel separate from the Google account): the X-Goog-PageId header is kept again when pasting request headers.</changes>
       <creator>schmij97, NikolajChristensen</creator>
       <category>musicservices</category>
-      <url>https://github.com/NikolajChristensen/lms-ytmusic/releases/download/v1.4.8.1/YouTubeMusic-1.4.8.1.zip</url>
-      <sha>173b1a521b1ec955ae4176976ccfe180d7e0ff37</sha>
+      <url>https://github.com/NikolajChristensen/lms-ytmusic/releases/download/v1.4.8.2/YouTubeMusic-1.4.8.2.zip</url>
+      <sha>8fe14d16895db07b05e9c0064de880aa94713a79</sha>
     </plugin>
   </plugins>
 </extensions>
