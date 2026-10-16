@@ -217,11 +217,9 @@ sub getNextTrack {
 
 
     my $port       = $prefs->get('proxy_port') || 9876;
-    # Use the real LMS server address rather than 127.0.0.1 so that
-    # players on separate machines can fetch the stream directly when
-    # LMS decides to use direct streaming instead of proxying.
-    my $server_ip  = Slim::Utils::Network::serverAddr() || '127.0.0.1';
-    my $streamUrl  = "http://$server_ip:$port/stream/$vid";
+    # Loopback: canDirectStream is 0, so LMS always fetches the stream itself
+    # and players never connect to the proxy (which only listens on 127.0.0.1).
+    my $streamUrl  = "http://127.0.0.1:$port/stream/$vid";
 
     # If autoplay is disabled, ensure repeat is off so player stops after queue ends
     unless ($prefs->get('autoplay') // 1) {

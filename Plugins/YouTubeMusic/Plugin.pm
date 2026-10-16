@@ -248,20 +248,28 @@ sub _find_python {
     return undef;
 }
 
+# The settings page reaches the proxy only through these LMS routes (so they
+# sit behind LMS's own web access control); the proxy itself listens on
+# loopback only. Downloads and updates can take minutes, hence the timeouts.
+my %_proxy_endpoint_timeout = (
+    ytdlp_status => 35, ffmpeg_status => 35, codec => 35, ping => 35, paths => 35,
+    download_ytdlp => 600, update_ytdlp => 600, download_ffmpeg => 600,
+);
+
 sub _register_proxy_handlers {
-    for my $ep (qw(ytdlp_status ffmpeg_status codec ping)) {
+    for my $ep (sort keys %_proxy_endpoint_timeout) {
         my $endpoint = $ep;
         Slim::Web::Pages->addRawFunction(
             "plugins/YouTubeMusic/proxy/$endpoint",
             sub {
                 my ($httpClient, $response) = @_;
-                my $port = $prefs->get('proxy_port') || 9876;
+                my $port  = $prefs->get('proxy_port') || 9876;
+                my $query = eval { $response->request->uri->query } // '';
                 Slim::Networking::SimpleAsyncHTTP->new(
                     sub {
                         my $http = shift;
                         $response->code(200);
                         $response->header('Content-Type', 'application/json');
-                        $response->header('Access-Control-Allow-Origin', '*');
                         $response->content($http->content);
                         $httpClient->send_response($response);
                         Slim::Web::HTTP::closeHTTPSocket($httpClient);
@@ -272,8 +280,8 @@ sub _register_proxy_handlers {
                         $httpClient->send_response($response);
                         Slim::Web::HTTP::closeHTTPSocket($httpClient);
                     },
-                    { timeout => 35 }
-                )->get("http://127.0.0.1:$port/$endpoint");
+                    { timeout => $_proxy_endpoint_timeout{$endpoint} }
+                )->get("http://127.0.0.1:$port/$endpoint" . ($query ne '' ? "?$query" : ''));
             }
         );
     }
