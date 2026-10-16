@@ -4,14 +4,14 @@
     <title lang="EN">YouTube Music for LMS (NikolajChristensen fork)</title>
   </details>
   <plugins>
-    <plugin name="YouTubeMusic" version="1.4.8.4" minTarget="9.0" maxTarget="*">
+    <plugin name="YouTubeMusic" version="1.4.8.5" minTarget="9.0" maxTarget="*">
       <title lang="EN">YouTube Music</title>
       <desc lang="EN">Browse, search, and stream YouTube Music to your Squeezebox players.</desc>
-      <changes lang="EN">Liked songs and playlist entries whose saved version has gone private or been removed now play the current copy, like the phone app does. Includes 1.4.8.3 (fallback for refused streams).</changes>
+      <changes lang="EN">Your own private playlists (My Library > My Playlists) now open with their tracks when a cookie is set. Includes 1.4.8.4 (unavailable liked songs play the current copy).</changes>
       <creator>schmij97, NikolajChristensen</creator>
       <category>musicservices</category>
-      <url>https://github.com/NikolajChristensen/lms-ytmusic/releases/download/v1.4.8.4/YouTubeMusic-1.4.8.4.zip</url>
-      <sha>02ee9c1c43d034c5b4bc9ab14a6ebd9e3037ca56</sha>
+      <url>https://github.com/NikolajChristensen/lms-ytmusic/releases/download/v1.4.8.5/YouTubeMusic-1.4.8.5.zip</url>
+      <sha>b1d8d3dda3abeeaa450944a188da2fb9b4c1bd01</sha>
     </plugin>
   </plugins>
 </extensions>
