@@ -128,7 +128,7 @@ sub _start_proxy {
         push @win_args, '--log-file',        $prefs->get('log_path')         if $prefs->get('log_path');
         push @win_args, '--no-node-worker'                                          if $prefs->get('disable_node_worker');
         push @win_args, '--ytm-cookie', $prefs->get('ytm_cookie')  if $prefs->get('ytm_cookie');
-        my $pid = system(1, $python, $script, '--port', $port, '--log-level', 'WARNING', '--codec', $codec, @win_args);
+        my $pid = system(1, $python, $script, '--port', $port, '--log-level', 'WARNING', '--codec', $codec, '--bind', '0.0.0.0', @win_args);
         if (!$pid) {
             $log->error("system(1,...) failed: $!");
             return;
