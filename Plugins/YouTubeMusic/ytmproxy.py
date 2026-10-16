@@ -175,13 +175,17 @@ def _normalize_pasted_headers(raw):
     Accept-Encoding (br, zstd) / Content-Length, so YouTube's replies can't be
     decoded ("Expecting value: line 1 column 1").
 
-    Only cookie, x-goog-authuser and authorization matter: ytmusicapi
-    recognises browser auth by an authorization header containing
+    Only cookie, x-goog-authuser, x-goog-pageid and authorization matter:
+    ytmusicapi recognises browser auth by an authorization header containing
     SAPISIDHASH and regenerates its value from the cookie on every request.
+    x-goog-pageid is only present when a brand account (a channel separate
+    from the main Google account) is selected; without it YouTube answers for
+    the main account, whose library is typically empty.
     Returns the normalised block, or the input unchanged if no cookie is found
     (so ytmusicapi reports what is missing).
     """
-    wanted = {"cookie": None, "x-goog-authuser": None, "authorization": None}
+    wanted = {"cookie": None, "x-goog-authuser": None, "x-goog-pageid": None,
+              "authorization": None}
     pending = None
     for line in (raw or "").replace("\r\n", "\n").replace("\r", "\n").split("\n"):
         line = line.strip()
@@ -204,13 +208,17 @@ def _normalize_pasted_headers(raw):
     auth = wanted["authorization"] or ""
     if "SAPISIDHASH" not in auth:
         auth = "SAPISIDHASH 0_0"                     # marker only; value is regenerated
-    logging.warning("YouTube Music headers: using cookie, x-goog-authuser%s",
-                    "" if wanted["x-goog-authuser"] else " (defaulted to 0)")
-    return "\n".join([
+    logging.warning("YouTube Music headers: using cookie, x-goog-authuser%s%s",
+                    "" if wanted["x-goog-authuser"] else " (defaulted to 0)",
+                    ", x-goog-pageid (brand account)" if wanted["x-goog-pageid"] else "")
+    lines = [
         f"cookie: {wanted['cookie']}",
         f"x-goog-authuser: {wanted['x-goog-authuser'] or '0'}",
         f"authorization: {auth}",
-    ])
+    ]
+    if wanted["x-goog-pageid"]:
+        lines.append(f"x-goog-pageid: {wanted['x-goog-pageid']}")
+    return "\n".join(lines)
 
 
 _CACHE = {}
