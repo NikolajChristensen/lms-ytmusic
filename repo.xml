@@ -4,14 +4,14 @@
     <title lang="EN">YouTube Music for LMS (NikolajChristensen fork)</title>
   </details>
   <plugins>
-    <plugin name="YouTubeMusic" version="1.4.7.2" minTarget="9.0" maxTarget="*">
+    <plugin name="YouTubeMusic" version="1.4.7.3" minTarget="9.0" maxTarget="*">
       <title lang="EN">YouTube Music</title>
       <desc lang="EN">Browse, search, and stream YouTube Music to your Squeezebox players.</desc>
-      <changes lang="EN">Fix wrong (video-still) artwork and missing album name in the queue when an album is opened after its tracks were already looked up, e.g. from a queue restored after a restart.</changes>
+      <changes lang="EN">With a YouTube Music cookie set: Speed dial, and Albums, Artists and Home under My Library. The login library now installs without pip (needs python3-requests).</changes>
       <creator>schmij97, NikolajChristensen</creator>
       <category>musicservices</category>
-      <url>https://github.com/NikolajChristensen/lms-ytmusic/releases/download/v1.4.7.2/YouTubeMusic-1.4.7.2.zip</url>
-      <sha>c200492b2f788bc2e9d9d5b78f1a3dc19d47f276</sha>
+      <url>https://github.com/NikolajChristensen/lms-ytmusic/releases/download/v1.4.7.3/YouTubeMusic-1.4.7.3.zip</url>
+      <sha>1826d7c6eef566757c195de3d3b6420392f7ad4f</sha>
     </plugin>
   </plugins>
 </extensions>
