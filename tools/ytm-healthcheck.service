@@ -1,0 +1,11 @@
+[Unit]
+Description=YouTube Music (Lyrion) playback health check
+After=network-online.target lyrionmusicserver.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /usr/local/bin/ytm-healthcheck.py
+StateDirectory=ytm-healthcheck
+# A failed check is reported to Home Assistant; don't also mark the unit failed.
+SuccessExitStatus=1

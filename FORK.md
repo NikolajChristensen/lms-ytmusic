@@ -57,3 +57,20 @@ tools/release.sh 1.4.7.1 --publish    # ...then commit, tag, push and create the
 Edit `<changes>` in `repo.xml` by hand first. The script writes the zip's
 SHA-1 into `<sha>` and refuses to finish if version, URL and checksum don't
 agree.
+
+## Playback health check (optional)
+
+`tools/ytm-healthcheck.py` streams the first 64 KB of a known song through the
+helper once a day (systemd timer, 06:30 ± 20 min). If that fails it runs the
+helper's yt-dlp update and tests again, then notifies Home Assistant through a
+webhook: *broken* (still failing; repeated daily), *repaired* (the update fixed
+it), *recovered* (working again) or *helper_down*. Install in the Lyrion
+host/container:
+
+```
+install -m 755 tools/ytm-healthcheck.py /usr/local/bin/
+install -m 644 tools/ytm-healthcheck.service tools/ytm-healthcheck.timer /etc/systemd/system/
+echo 'HA_WEBHOOK_URL=http://<home-assistant>:8123/api/webhook/<id>' > /etc/ytm-healthcheck.conf
+systemctl daemon-reload && systemctl enable --now ytm-healthcheck.timer
+ytm-healthcheck.py --test-notify      # check the notification arrives
+```
