@@ -217,11 +217,9 @@ sub getNextTrack {
 
 
     my $port       = $prefs->get('proxy_port') || 9876;
-    # Use the real LMS server address rather than 127.0.0.1 so that
-    # players on separate machines can fetch the stream directly when
-    # LMS decides to use direct streaming instead of proxying.
-    my $server_ip  = Slim::Utils::Network::serverAddr() || '127.0.0.1';
-    my $streamUrl  = "http://$server_ip:$port/stream/$vid";
+    # Loopback: canDirectStream is 0, so LMS always fetches the stream itself
+    # and players never connect to the proxy (which only listens on 127.0.0.1).
+    my $streamUrl  = "http://127.0.0.1:$port/stream/$vid";
 
     # If autoplay is disabled, ensure repeat is off so player stops after queue ends
     unless ($prefs->get('autoplay') // 1) {
@@ -341,16 +339,26 @@ my %_metadata_cache;
 # already have on hand from search/browse results, so the cache is warm
 # before LMS ever needs it - avoids a placeholder-text flash while the
 # normal async getSongInfo fetch would otherwise still be in flight.
+#
+# The first browse/search result for a track wins, but it does replace an
+# entry that only came from getSongInfo: that lookup describes the video
+# (video-still cover, channel name, no album), and it can easily run first,
+# e.g. for a queue LMS restores after a restart.
 sub primeMetadata {
     my ($class, $video_id, $info) = @_;
     return unless $video_id && $info;
 
-    $_metadata_cache{$video_id} ||= {
-        title    => $info->{title}     || '',
-        artist   => $info->{artist}    || '',
-        album    => $info->{album}     || '',
-        duration => $info->{duration}  || 0,
-        cover    => $info->{thumbnail} || '',
+    my $have = $_metadata_cache{$video_id};
+    return if $have && $have->{primed};
+    $have ||= {};
+
+    $_metadata_cache{$video_id} = {
+        title    => $info->{title}     || $have->{title}    || '',
+        artist   => $info->{artist}    || $have->{artist}   || '',
+        album    => $info->{album}     || $have->{album}    || '',
+        duration => $info->{duration}  || $have->{duration} || 0,
+        cover    => $info->{thumbnail} || $have->{cover}    || '',
+        primed   => 1,
     };
 }
 
@@ -433,6 +441,7 @@ sub _merge_song_info {
         album    => $have->{album}    || $info->{album}     || '',
         duration => $info->{duration} || $have->{duration}  || 0,
         cover    => $have->{cover}    || $info->{thumbnail} || '',
+        primed   => $have->{primed},
     };
 }
 

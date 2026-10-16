@@ -49,6 +49,64 @@ def _get_ytm_auth():
     """Return authenticated YTMusic instance or None."""
     return _ytm_auth
 
+# Pinned so a new release can't change behaviour underneath us. ytmusicapi's
+# only dependency is requests; requests and its dependencies are fetched too
+# when the system Python doesn't have them (e.g. piCorePlayer). All are
+# pure-Python wheels, so the same files work on every platform.
+_YTMUSICAPI_VERSION = "1.12.3"
+_REQUESTS_WHEELS = (
+    ("requests",           "2.34.2"),
+    ("urllib3",            "2.8.0"),
+    ("idna",               "3.20"),
+    ("charset-normalizer", "3.5.2"),
+    ("certifi",            "2026.7.22"),
+)
+
+def _install_pinned_wheel(name, version):
+    """Download the pure-Python wheel of name==version from PyPI into BIN_DIR,
+    verified against the sha256 PyPI publishes. Returns True on success."""
+    import hashlib, io, zipfile
+    try:
+        with urllib.request.urlopen(f"https://pypi.org/pypi/{name}/{version}/json", timeout=20) as resp:
+            meta = json.loads(resp.read())
+        wheel = next(u for u in meta["urls"] if u["filename"].endswith("-py3-none-any.whl"))
+        with urllib.request.urlopen(wheel["url"], timeout=60) as resp:
+            data = resp.read()
+        if hashlib.sha256(data).hexdigest() != wheel["digests"]["sha256"]:
+            logging.warning("%s wheel checksum mismatch, not installing", name)
+            return False
+        os.makedirs(BIN_DIR, exist_ok=True)
+        with zipfile.ZipFile(io.BytesIO(data)) as zf:
+            zf.extractall(BIN_DIR)
+        logging.warning("%s %s installed to %s", name, version, BIN_DIR)
+        return True
+    except Exception as e:
+        logging.warning("%s wheel install failed: %s", name, e)
+        return False
+
+def _install_ytmusicapi_wheel():
+    """Install ytmusicapi (and requests, if missing) into BIN_DIR without pip.
+    Returns True on success."""
+    import importlib
+    if BIN_DIR not in sys.path:
+        sys.path.insert(0, BIN_DIR)
+    try:
+        import requests  # noqa: F401  (ytmusicapi's only dependency)
+    except ImportError:
+        logging.warning("Python 'requests' not found; installing it into %s", BIN_DIR)
+        if not all(_install_pinned_wheel(n, v) for n, v in _REQUESTS_WHEELS):
+            return False
+        importlib.invalidate_caches()
+        try:
+            import requests  # noqa: F401,F811
+        except ImportError as e:
+            logging.warning("requests still not importable: %s", e)
+            return False
+    if not _install_pinned_wheel("ytmusicapi", _YTMUSICAPI_VERSION):
+        return False
+    importlib.invalidate_caches()
+    return True
+
 def _init_ytm_auth(headers_raw):
     """Initialize ytmusicapi with raw browser headers string."""
     global _ytm_auth, _ytm_cookie
@@ -57,7 +115,18 @@ def _init_ytm_auth(headers_raw):
         _ytm_cookie = None
         return False
     try:
-        # Auto-install ytmusicapi if not available
+        # Auto-install ytmusicapi if not available. Prefer a verified wheel
+        # in BIN_DIR (no pip needed, system Python untouched); pip is the
+        # fallback.
+        try:
+            from ytmusicapi import YTMusic, setup
+        except ImportError:
+            if BIN_DIR not in sys.path:
+                sys.path.insert(0, BIN_DIR)
+        try:
+            from ytmusicapi import YTMusic, setup
+        except ImportError:
+            _install_ytmusicapi_wheel()
         try:
             from ytmusicapi import YTMusic, setup
         except ImportError:
@@ -78,10 +147,8 @@ def _init_ytm_auth(headers_raw):
             from ytmusicapi import YTMusic, setup
             logging.info("ytmusicapi installed successfully")
         from ytmusicapi import YTMusic, setup
-        # Clean headers — remove Windows line endings and normalize whitespace
-        cleaned = headers_raw.strip().replace('\r\n', '\n').replace('\r', '\n')
-        # Remove lines that are just whitespace
-        cleaned = '\n'.join(line for line in cleaned.splitlines() if line.strip())
+        # Reduce whatever was pasted to the headers ytmusicapi actually needs
+        cleaned = _normalize_pasted_headers(headers_raw)
         # setup() converts raw headers to the format ytmusicapi needs
         auth_str = setup(headers_raw=cleaned)
         _ytm_auth = YTMusic(auth_str)
@@ -93,6 +160,57 @@ def _init_ytm_auth(headers_raw):
         _ytm_auth = None
         _ytm_cookie = None
         return False
+
+
+
+def _normalize_pasted_headers(raw):
+    """Turn pasted browser request headers into the three ytmusicapi needs.
+
+    Browsers copy headers in different shapes: "Name: value" per line
+    (Firefox raw view, older Chrome "Copy request headers"), or - when the
+    current Chrome DevTools table is selected with the mouse - the name and
+    the value on separate lines, including HTTP/2 pseudo-headers such as
+    ":authority". Passed through as-is, ytmusicapi turns the pseudo-header
+    values into bogus header names and keeps Chrome's capitalised
+    Accept-Encoding (br, zstd) / Content-Length, so YouTube's replies can't be
+    decoded ("Expecting value: line 1 column 1").
+
+    Only cookie, x-goog-authuser and authorization matter: ytmusicapi
+    recognises browser auth by an authorization header containing
+    SAPISIDHASH and regenerates its value from the cookie on every request.
+    Returns the normalised block, or the input unchanged if no cookie is found
+    (so ytmusicapi reports what is missing).
+    """
+    wanted = {"cookie": None, "x-goog-authuser": None, "authorization": None}
+    pending = None
+    for line in (raw or "").replace("\r\n", "\n").replace("\r", "\n").split("\n"):
+        line = line.strip()
+        if not line:
+            continue
+        if pending is not None:                      # value line of a "name" line
+            if pending in wanted and wanted[pending] is None:
+                wanted[pending] = line
+            pending = None
+            continue
+        m = re.match(r"^(:?[A-Za-z0-9-]+):(?:\s+(.*))?$", line)
+        if m and m.group(2):                         # "Name: value"
+            name = m.group(1).lower()
+            if name in wanted and wanted[name] is None:
+                wanted[name] = m.group(2).strip()
+        elif m or re.match(r"^:?[A-Za-z0-9-]+$", line):  # "Name:" or "Name" alone
+            pending = (m.group(1) if m else line).lower()
+    if not wanted["cookie"]:
+        return (raw or "").strip()
+    auth = wanted["authorization"] or ""
+    if "SAPISIDHASH" not in auth:
+        auth = "SAPISIDHASH 0_0"                     # marker only; value is regenerated
+    logging.warning("YouTube Music headers: using cookie, x-goog-authuser%s",
+                    "" if wanted["x-goog-authuser"] else " (defaulted to 0)")
+    return "\n".join([
+        f"cookie: {wanted['cookie']}",
+        f"x-goog-authuser: {wanted['x-goog-authuser'] or '0'}",
+        f"authorization: {auth}",
+    ])
 
 
 _CACHE = {}
@@ -196,14 +314,36 @@ def _duration_to_secs(d):
         pass
     return 0
 
+_DURATION_RE = re.compile(r"^\d+:\d{2}(:\d{2})?$")
+_PLAYS_RE    = re.compile(r"\b(plays|views)$", re.I)
+
+def _col_texts(renderer, col_idx):
+    """All run texts of a flex column, without the " • " separators."""
+    try:
+        runs = renderer["flexColumns"][col_idx]["musicResponsiveListItemFlexColumnRenderer"]["text"].get("runs", [])
+    except (IndexError, KeyError):
+        return []
+    return [t for t in (x.get("text", "").strip() for x in runs) if t and t != "\u2022"]
+
 def _parse_song(r):
     video_id = _video_id_from_overlay(r)
+    # Search results put "Artist • Album • 3:52" in the second column and
+    # the play count in the third; album pages and charts use other layouts.
+    second   = _col_texts(r, 1)
+    album    = _col(r, 2)
+    duration = _fixed_col(r, 0) or _col(r, 3) or _col(r, 4)
+    if _PLAYS_RE.search(album):
+        album = ""
+    if second and _DURATION_RE.match(second[-1]):
+        duration = duration or second[-1]
+        if not album and len(second) >= 3:
+            album = second[-2]
     return {
         "type":      "song",
         "title":     _col(r, 0),
         "artist":    _col(r, 1),
-        "album":     _col(r, 2),
-        "duration":  _duration_to_secs(_fixed_col(r, 0) or _col(r, 3) or _col(r, 4)),
+        "album":     album,
+        "duration":  _duration_to_secs(duration),
         "videoId":   video_id,
         "thumbnail": _thumb_from_renderer(r),
         "url":       f"ytm://{video_id}" if video_id else "",
@@ -476,6 +616,80 @@ def get_history():
         return {"items": items}
     except Exception as e:
         logging.warning("get_history failed: %s", e)
+        return {"error": str(e), "items": []}
+
+def _ytm_thumb(x):
+    thumbs = x.get("thumbnails") or []
+    return thumbs[-1].get("url", "") if thumbs else ""
+
+def _ytm_artists(x):
+    return ", ".join(a.get("name", "") for a in (x.get("artists") or []) if a.get("name"))
+
+def _ytm_item(x):
+    """Map a ytmusicapi home/library entry onto the plugin's item format."""
+    if not isinstance(x, dict):
+        return None
+    thumb = _ytm_thumb(x)
+    bid   = x.get("browseId") or ""
+    if x.get("videoId"):
+        album = x.get("album")
+        return {
+            "type": "song", "videoId": x["videoId"], "url": f"ytm://{x['videoId']}",
+            "title": x.get("title", ""), "artist": _ytm_artists(x),
+            "album": album.get("name", "") if isinstance(album, dict) else "",
+            "duration": x.get("duration_seconds", 0), "thumbnail": thumb,
+        }
+    if bid.startswith("MPRE"):
+        return {"type": "album", "browseId": bid, "title": x.get("title", ""),
+                "artist": _ytm_artists(x), "year": x.get("year", "") or x.get("type", ""),
+                "thumbnail": thumb}
+    if bid.startswith("UC"):
+        name = x.get("title") or x.get("artist") or ""
+        return {"type": "artist", "browseId": bid, "name": name, "title": name, "thumbnail": thumb}
+    pid = x.get("playlistId") or (bid[2:] if bid.startswith("VL") else "")
+    if pid:
+        return {"type": "playlist", "browseId": f"VL{pid}", "title": x.get("title", ""),
+                "count": x.get("count", ""), "thumbnail": thumb, "url": f"ytmplaylist://VL{pid}"}
+    return None
+
+def _ytm_items(rows):
+    return [i for i in (_ytm_item(x) for x in rows or []) if i]
+
+def get_personal_home(limit=20):
+    """The signed-in home page: Speed dial, Listen again, Quick picks, mixes..."""
+    yt = _get_ytm_auth()
+    if not yt:
+        return {"error": "not_authenticated", "sections": []}
+    try:
+        sections = []
+        for sec in yt.get_home(limit=limit):
+            items = _ytm_items(sec.get("contents"))
+            if items:
+                sections.append({"title": sec.get("title") or "", "items": items})
+        return {"sections": sections}
+    except Exception as e:
+        logging.warning("get_home failed: %s", e)
+        return {"error": str(e), "sections": []}
+
+def get_library_albums(limit=500):
+    yt = _get_ytm_auth()
+    if not yt:
+        return {"error": "not_authenticated", "items": []}
+    try:
+        return {"items": _ytm_items(yt.get_library_albums(limit=limit))}
+    except Exception as e:
+        logging.warning("get_library_albums failed: %s", e)
+        return {"error": str(e), "items": []}
+
+def get_library_artists(limit=500):
+    """Artists you subscribe to - the closest thing to 'liked artists'."""
+    yt = _get_ytm_auth()
+    if not yt:
+        return {"error": "not_authenticated", "items": []}
+    try:
+        return {"items": _ytm_items(yt.get_library_subscriptions(limit=limit))}
+    except Exception as e:
+        logging.warning("get_library_subscriptions failed: %s", e)
         return {"error": str(e), "items": []}
 
 def get_library_songs(limit=100):
@@ -912,6 +1126,96 @@ def _fill_album_track_metadata(data, items):
         if thumb and not item.get("thumbnail"):
             item["thumbnail"] = thumb
 
+def _album_track_rows(data):
+    """The raw track rows of an album page, in album order."""
+    sections = (
+        data.get("contents", {})
+            .get("twoColumnBrowseResultsRenderer", {})
+            .get("secondaryContents", {})
+            .get("sectionListRenderer", {})
+            .get("contents", [])
+    )
+    rows = []
+    for section in sections:
+        for entry in section.get("musicShelfRenderer", {}).get("contents", []):
+            r = entry.get("musicResponsiveListItemRenderer")
+            if r:
+                rows.append(r)
+    return rows
+
+def _norm_title(t):
+    return re.sub(r"\s+", " ", (t or "").lower()).strip()
+
+def _find_replacement_track(artist, title, duration, album=""):
+    """A playable copy of an album track that YouTube greys out.
+
+    When a release is superseded (re-issue, artist renamed, ...), the old
+    album page keeps listing its tracks but greys them out; their video IDs
+    are dead ("Video unavailable"). The YouTube Music apps quietly play the
+    current release's copy instead. Find it by searching for the song and
+    accepting only a result with the same title (optionally prefixed
+    "Artist - ") and a duration within 5 seconds, which rules out live
+    versions, edits and remixes."""
+    want = _norm_title(title)
+    try:
+        results = search(f"{artist} {title}".strip(), "songs")
+    except Exception as e:
+        logging.warning("replacement search failed for %s: %s", title, e)
+        return None
+    candidates = []
+    for r in results:
+        if r.get("type") != "song" or not r.get("videoId"):
+            continue
+        got = _norm_title(r.get("title"))
+        if got != want and not got.endswith(" - " + want):
+            continue
+        if duration and r.get("duration") and abs(r["duration"] - duration) > 5:
+            continue
+        candidates.append(r)
+    # Prefer a copy on an album of the same name (the re-issue usually is)
+    same_album = [r for r in candidates if album and _norm_title(r.get("album")) == _norm_title(album)]
+    return (same_album or candidates or [None])[0]
+
+def _with_replaced_album_tracks(data, items):
+    """Album items in album order, with greyed-out tracks swapped for a
+    playable copy where one can be found (see _find_replacement_track).
+    Albums without greyed-out tracks are returned unchanged."""
+    rows = _album_track_rows(data)
+    missing = [i for i, r in enumerate(rows) if not _video_id_from_overlay(r)]
+    if not missing:
+        return items
+    header = _album_header(data)
+    artist = _text(header, "straplineTextOne")
+    album  = _text(header, "title")
+    from concurrent.futures import ThreadPoolExecutor
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        found = dict(zip(missing, pool.map(
+            lambda i: _find_replacement_track(
+                artist, _col(rows[i], 0),
+                _duration_to_secs(_fixed_col(rows[i], 0)), album),
+            missing)))
+    by_vid = {it.get("videoId"): it for it in items if it.get("videoId")}
+    out = []
+    for i, r in enumerate(rows):
+        vid = _video_id_from_overlay(r)
+        if vid:
+            if vid in by_vid:
+                out.append(by_vid[vid])
+            continue
+        rep = found.get(i)
+        if rep:
+            out.append({
+                "type": "song", "videoId": rep["videoId"], "url": f"ytm://{rep['videoId']}",
+                "title": _col(r, 0), "artist": "", "album": "",
+                "duration": _duration_to_secs(_fixed_col(r, 0)) or rep.get("duration", 0),
+                "thumbnail": "",
+            })
+    logging.info("album: %d greyed-out track(s), %d replaced", len(missing), sum(1 for v in found.values() if v))
+    # keep anything the page had outside the track shelf (none expected)
+    seen = {it.get("videoId") for it in out}
+    out.extend(it for it in items if it.get("videoId") not in seen)
+    return out
+
 def browse_playlist(browse_id):
     cache_key = f"playlist:{browse_id}"
     cached = _cache_get(cache_key)
@@ -956,6 +1260,7 @@ def browse_playlist(browse_id):
                             items.extend(_shelf_items({"contents": [entry]}))
 
     if browse_id.startswith("MPREb_"):
+        items = _with_replaced_album_tracks(data, items)
         _fill_album_track_metadata(data, items)
 
     result = {"browseId": browse_id, "items": items}
@@ -2240,6 +2545,15 @@ class _Handler(BaseHTTPRequestHandler):
             elif path == "/library/history":
                 self._send_json(get_history())
 
+            elif path == "/library/home":
+                self._send_json(get_personal_home())
+
+            elif path == "/library/albums":
+                self._send_json(get_library_albums())
+
+            elif path == "/library/artists":
+                self._send_json(get_library_artists())
+
             elif path == "/auth/status":
                 yt = _get_ytm_auth()
                 self._send_json({"authenticated": yt is not None})
@@ -2408,7 +2722,7 @@ class _Handler(BaseHTTPRequestHandler):
             logging.exception("Proxy error on %s", self.path)
             self._error("Internal proxy error", 500)
 
-def run(port=9876, log_level="INFO", codec="auto", log_file="", no_node_worker=False):
+def run(port=9876, log_level="INFO", codec="auto", log_file="", no_node_worker=False, bind="127.0.0.1"):
     global _AUDIO_CODEC, _AUDIO_FORMAT, _AUDIO_MIME
     if codec == "mp3":
         _AUDIO_CODEC, _AUDIO_FORMAT, _AUDIO_MIME = "libmp3lame", "mp3", "audio/mpeg"
@@ -2495,8 +2809,13 @@ def run(port=9876, log_level="INFO", codec="auto", log_file="", no_node_worker=F
     import threading as _wt
     _wt.Thread(target=_warmup_ydl, daemon=True).start()
 
-    server = ThreadingHTTPServer(("0.0.0.0", port), _Handler)
-    logging.info("YTMusic proxy listening on 0.0.0.0:%d", port)
+    # Loopback only: LMS reaches the proxy itself (players never connect to
+    # it directly - canDirectStream is 0), and the settings page goes through
+    # LMS's /plugins/YouTubeMusic/proxy/ routes. Listening on all interfaces
+    # exposed library, history, cookie replacement and the yt-dlp
+    # download/update endpoints to the whole network without authentication.
+    server = ThreadingHTTPServer((bind, port), _Handler)
+    logging.info("YTMusic proxy listening on %s:%d", bind, port)
     server.serve_forever()
 
 if __name__ == "__main__":
@@ -2510,6 +2829,7 @@ if __name__ == "__main__":
     ap.add_argument("--log-file",      default="", help="Path to log file (default: BIN_DIR/ytmproxy.log)")
     ap.add_argument("--no-node-worker", action="store_true", help="Disable persistent Node worker (saves ~140MB RAM)")
     ap.add_argument("--ytm-cookie", default="", help="YouTube Music browser cookie for authenticated access")
+    ap.add_argument("--bind",       default="127.0.0.1", help="Address to listen on (default: loopback only)")
     args = ap.parse_args()
     # Apply path overrides before run()
     if args.ytdlp and os.path.isfile(args.ytdlp):
@@ -2523,4 +2843,4 @@ if __name__ == "__main__":
         logging.info("node path override: %s", args.node)
     if args.ytm_cookie:
         _init_ytm_auth(args.ytm_cookie)
-    run(args.port, args.log_level, args.codec, args.log_file, args.no_node_worker)
+    run(args.port, args.log_level, args.codec, args.log_file, args.no_node_worker, args.bind)

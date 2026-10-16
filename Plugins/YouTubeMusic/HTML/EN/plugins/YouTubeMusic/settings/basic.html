@@ -12,7 +12,7 @@
         document.getElementById('ytdlpDownloadBtn').disabled = true;
         document.getElementById('ytdlpUpdateBtn').disabled = true;
         status.textContent = loadingMsg;
-        fetch('http://' + window.location.hostname + ':9876/' + endpoint)
+        fetch('/plugins/YouTubeMusic/proxy/' + endpoint)
             .then(r => r.json())
             .then(d => {
                 if (d.status === 'ok') {
@@ -89,7 +89,7 @@
         var status = document.getElementById('ffmpegStatus');
         btn.disabled = true;
         status.textContent = 'Downloading ffmpeg... (may take a few minutes)';
-        fetch('http://' + window.location.hostname + ':9876/download_ffmpeg')
+        fetch('/plugins/YouTubeMusic/proxy/download_ffmpeg')
             .then(r => r.json())
             .then(d => {
                 if (d.status === 'ok') {
@@ -120,7 +120,7 @@
     <input type="checkbox" name="pref_autoplay" id="pref_autoplay" value="1" [% IF pref_autoplay %]checked[% END %] />
     <label for="pref_autoplay">Enable autoplay (add similar songs when queue ends)</label>
   [% END %]
-  [% WRAPPER setting title="YouTube Music Account (Optional)" desc="Authenticate with your YouTube Music account to access your personal library, liked songs, and playlists. To get your headers: open music.youtube.com in Chrome while logged in, press F12, go to Network tab, type /browse in the filter, reload the page, click a browse request, go to Headers tab, right-click Request Headers and copy all. Paste the full headers block below." %]
+  [% WRAPPER setting title="YouTube Music Account (Optional)" desc="Authenticate with your YouTube Music account to access your personal library, liked songs, and playlists. To get your headers: open music.youtube.com in your browser while logged in, press F12 and open the Network tab, type browse (no slash) in the filter, then click Home or Library so requests appear. Click a POST browse request, open its Headers tab and copy the whole Request headers section - in Chrome, select it with the mouse from the first line to the last; in Firefox, switch on Raw and copy all. Paste it below; only the Cookie and X-Goog-Authuser lines are used." %]
     <textarea name="pref_ytm_cookie" id="ytm_cookie_field" rows="4"
               style="width:100%;font-family:monospace;font-size:0.8em;resize:vertical;"
               placeholder="Paste your full request headers here (optional). Leave empty to use without authentication. Headers should include Cookie:, x-goog-authuser:, authorization: and other YouTube headers.">[% prefs.ytm_cookie | html %]</textarea>
@@ -227,7 +227,7 @@
     </table>
     <script>
     (function() {
-        fetch('http://' + window.location.hostname + ':9876/paths')
+        fetch('/plugins/YouTubeMusic/proxy/paths')
             .then(r => r.json())
             .then(d => {
                 var el = document.getElementById('logPathDisplay');
@@ -279,7 +279,7 @@
             ffmpeg: document.getElementById('override_ffmpeg').value,
             node:   document.getElementById('override_node').value
         });
-        fetch('http://' + window.location.hostname + ':9876/paths?' + params.toString())
+        fetch('/plugins/YouTubeMusic/proxy/paths?' + params.toString())
             .then(r => r.json())
             .then(d => {
                 var ov = d.override_valid || {};
@@ -309,7 +309,7 @@
     </table>
     <script>
     (function() {
-        fetch('http://' + window.location.hostname + ':9876/paths')
+        fetch('/plugins/YouTubeMusic/proxy/paths')
             .then(r => r.json())
             .then(d => {
                 document.getElementById('pathsLoading').style.display = 'none';
