@@ -47,7 +47,9 @@ rm -rf "$PLUGIN_DIR/__pycache__"
 # run and --publish agree. Every entry's mtime is pinned to the last commit's
 # time (in UTC, since zip stores local time), entries go in in sorted order,
 # and -X drops uid/gid and platform extra fields.
-EPOCH=$(git log -1 --format=%ct)
+# The time comes from the last commit touching the plugin's code, not counting
+# install.xml, so committing the version bump doesn't change the zip.
+EPOCH=$(git log -1 --format=%ct -- "$PLUGIN_DIR" ":(exclude)$PLUGIN_DIR/install.xml")
 FILES=$(find "$PLUGIN_DIR" \( -name __pycache__ -o -name '*.pyc' -o -name '*.orig' -o -name '*.swp' \
 	-o -name '*~' -o -name .DS_Store \) -prune -o -print | LC_ALL=C sort)
 # shellcheck disable=SC2086
