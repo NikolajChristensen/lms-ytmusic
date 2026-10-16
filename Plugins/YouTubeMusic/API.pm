@@ -139,4 +139,19 @@ sub getHistory {
     _get("/library/history", $cb);
 }
 
+sub getLibraryHome {
+    my ($class, $cb) = @_;
+    _get("/library/home", $cb);
+}
+
+sub getLibraryAlbums {
+    my ($class, $cb) = @_;
+    _get("/library/albums", $cb);
+}
+
+sub getLibraryArtists {
+    my ($class, $cb) = @_;
+    _get("/library/artists", $cb);
+}
+
 1;
