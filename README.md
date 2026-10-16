@@ -24,7 +24,7 @@ accordance with YouTube's Terms of Service.
 
 - Browse Home, Charts & Trending, New Releases, Moods & Genres, Podcasts
 - Search (Songs, Albums, Artists, Playlists)
-- My Playlists — save favourite playlists so they always appear in the menu
+- Saved Playlists — save favourite playlists so they always appear in the menu (no sign-in needed)
 - Play individual songs or explode a full playlist/album into your queue
 - Background prefetching of the next track so transitions are near-instant
 - Works on real Squeezebox hardware (tested on Squeezebox Radio) and
@@ -151,9 +151,9 @@ The settings page shows auto-discovered paths for Python, yt-dlp, ffmpeg, and No
 ### Proxy Port
 Change the local proxy port (default `9876`) if it conflicts with something else on your system.
 
-## My Playlists
+## Saved Playlists
 
-You can save YouTube Music playlists so they always appear in the **My Playlists** menu.
+You can save YouTube Music playlists so they always appear in the **Saved Playlists** menu. The menu appears once at least one playlist is saved. This works without signing in; when you are signed in, your account's own playlists are listed under **My Library → My Playlists**.
 
 **To add a playlist using the URL helper (easiest):**
 1. Open [music.youtube.com](https://music.youtube.com) in a browser
@@ -163,7 +163,7 @@ You can save YouTube Music playlists so they always appear in the **My Playlists
 
 **To add manually**, enter one per line as: Playlist Name|VLPLxxxxxxxxxx
 
-> **Note:** Playlists must be set to **Public** or **Unlisted (Hidden)** on YouTube Music — Private playlists cannot be accessed via the API.
+> **Note:** Playlists saved here must be set to **Public** or **Unlisted (Hidden)** on YouTube Music.
 
 ## Troubleshooting
 
