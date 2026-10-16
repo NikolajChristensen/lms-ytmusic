@@ -2537,7 +2537,7 @@ class _Handler(BaseHTTPRequestHandler):
             logging.exception("Proxy error on %s", self.path)
             self._error("Internal proxy error", 500)
 
-def run(port=9876, log_level="INFO", codec="auto", log_file="", no_node_worker=False):
+def run(port=9876, log_level="INFO", codec="auto", log_file="", no_node_worker=False, bind="127.0.0.1"):
     global _AUDIO_CODEC, _AUDIO_FORMAT, _AUDIO_MIME
     if codec == "mp3":
         _AUDIO_CODEC, _AUDIO_FORMAT, _AUDIO_MIME = "libmp3lame", "mp3", "audio/mpeg"
@@ -2624,8 +2624,13 @@ def run(port=9876, log_level="INFO", codec="auto", log_file="", no_node_worker=F
     import threading as _wt
     _wt.Thread(target=_warmup_ydl, daemon=True).start()
 
-    server = ThreadingHTTPServer(("0.0.0.0", port), _Handler)
-    logging.info("YTMusic proxy listening on 0.0.0.0:%d", port)
+    # Loopback only: LMS reaches the proxy itself (players never connect to
+    # it directly - canDirectStream is 0), and the settings page goes through
+    # LMS's /plugins/YouTubeMusic/proxy/ routes. Listening on all interfaces
+    # exposed library, history, cookie replacement and the yt-dlp
+    # download/update endpoints to the whole network without authentication.
+    server = ThreadingHTTPServer((bind, port), _Handler)
+    logging.info("YTMusic proxy listening on %s:%d", bind, port)
     server.serve_forever()
 
 if __name__ == "__main__":
@@ -2639,6 +2644,7 @@ if __name__ == "__main__":
     ap.add_argument("--log-file",      default="", help="Path to log file (default: BIN_DIR/ytmproxy.log)")
     ap.add_argument("--no-node-worker", action="store_true", help="Disable persistent Node worker (saves ~140MB RAM)")
     ap.add_argument("--ytm-cookie", default="", help="YouTube Music browser cookie for authenticated access")
+    ap.add_argument("--bind",       default="127.0.0.1", help="Address to listen on (default: loopback only)")
     args = ap.parse_args()
     # Apply path overrides before run()
     if args.ytdlp and os.path.isfile(args.ytdlp):
@@ -2652,4 +2658,4 @@ if __name__ == "__main__":
         logging.info("node path override: %s", args.node)
     if args.ytm_cookie:
         _init_ytm_auth(args.ytm_cookie)
-    run(args.port, args.log_level, args.codec, args.log_file, args.no_node_worker)
+    run(args.port, args.log_level, args.codec, args.log_file, args.no_node_worker, args.bind)

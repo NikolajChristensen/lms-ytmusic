@@ -12,7 +12,7 @@
         document.getElementById('ytdlpDownloadBtn').disabled = true;
         document.getElementById('ytdlpUpdateBtn').disabled = true;
         status.textContent = loadingMsg;
-        fetch('http://' + window.location.hostname + ':9876/' + endpoint)
+        fetch('/plugins/YouTubeMusic/proxy/' + endpoint)
             .then(r => r.json())
             .then(d => {
                 if (d.status === 'ok') {
@@ -89,7 +89,7 @@
         var status = document.getElementById('ffmpegStatus');
         btn.disabled = true;
         status.textContent = 'Downloading ffmpeg... (may take a few minutes)';
-        fetch('http://' + window.location.hostname + ':9876/download_ffmpeg')
+        fetch('/plugins/YouTubeMusic/proxy/download_ffmpeg')
             .then(r => r.json())
             .then(d => {
                 if (d.status === 'ok') {
@@ -227,7 +227,7 @@
     </table>
     <script>
     (function() {
-        fetch('http://' + window.location.hostname + ':9876/paths')
+        fetch('/plugins/YouTubeMusic/proxy/paths')
             .then(r => r.json())
             .then(d => {
                 var el = document.getElementById('logPathDisplay');
@@ -279,7 +279,7 @@
             ffmpeg: document.getElementById('override_ffmpeg').value,
             node:   document.getElementById('override_node').value
         });
-        fetch('http://' + window.location.hostname + ':9876/paths?' + params.toString())
+        fetch('/plugins/YouTubeMusic/proxy/paths?' + params.toString())
             .then(r => r.json())
             .then(d => {
                 var ov = d.override_valid || {};
@@ -309,7 +309,7 @@
     </table>
     <script>
     (function() {
-        fetch('http://' + window.location.hostname + ':9876/paths')
+        fetch('/plugins/YouTubeMusic/proxy/paths')
             .then(r => r.json())
             .then(d => {
                 document.getElementById('pathsLoading').style.display = 'none';
