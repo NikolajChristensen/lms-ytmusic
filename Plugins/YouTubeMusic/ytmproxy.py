@@ -49,40 +49,63 @@ def _get_ytm_auth():
     """Return authenticated YTMusic instance or None."""
     return _ytm_auth
 
-# Pinned so a new ytmusicapi release can't change behaviour underneath us.
-# Its only dependency is requests (Debian: python3-requests).
+# Pinned so a new release can't change behaviour underneath us. ytmusicapi's
+# only dependency is requests; requests and its dependencies are fetched too
+# when the system Python doesn't have them (e.g. piCorePlayer). All are
+# pure-Python wheels, so the same files work on every platform.
 _YTMUSICAPI_VERSION = "1.12.3"
+_REQUESTS_WHEELS = (
+    ("requests",           "2.34.2"),
+    ("urllib3",            "2.8.0"),
+    ("idna",               "3.20"),
+    ("charset-normalizer", "3.5.2"),
+    ("certifi",            "2026.7.22"),
+)
 
-def _install_ytmusicapi_wheel():
-    """Download the pinned ytmusicapi wheel from PyPI into BIN_DIR, verifying
-    it against the sha256 PyPI publishes. Returns True on success."""
+def _install_pinned_wheel(name, version):
+    """Download the pure-Python wheel of name==version from PyPI into BIN_DIR,
+    verified against the sha256 PyPI publishes. Returns True on success."""
     import hashlib, io, zipfile
     try:
-        import requests  # noqa: F401  (ytmusicapi's only dependency)
-    except ImportError:
-        logging.warning("ytmusicapi needs the Python 'requests' module; "
-                        "on Debian/Ubuntu: apt install python3-requests")
-        return False
-    try:
-        meta_url = f"https://pypi.org/pypi/ytmusicapi/{_YTMUSICAPI_VERSION}/json"
-        with urllib.request.urlopen(meta_url, timeout=20) as resp:
+        with urllib.request.urlopen(f"https://pypi.org/pypi/{name}/{version}/json", timeout=20) as resp:
             meta = json.loads(resp.read())
-        wheel = next(u for u in meta["urls"] if u["filename"].endswith(".whl"))
+        wheel = next(u for u in meta["urls"] if u["filename"].endswith("-py3-none-any.whl"))
         with urllib.request.urlopen(wheel["url"], timeout=60) as resp:
             data = resp.read()
         if hashlib.sha256(data).hexdigest() != wheel["digests"]["sha256"]:
-            logging.warning("ytmusicapi wheel checksum mismatch, not installing")
+            logging.warning("%s wheel checksum mismatch, not installing", name)
             return False
         os.makedirs(BIN_DIR, exist_ok=True)
         with zipfile.ZipFile(io.BytesIO(data)) as zf:
             zf.extractall(BIN_DIR)
-        if BIN_DIR not in sys.path:
-            sys.path.insert(0, BIN_DIR)
-        logging.info("ytmusicapi %s installed to %s", _YTMUSICAPI_VERSION, BIN_DIR)
+        logging.warning("%s %s installed to %s", name, version, BIN_DIR)
         return True
     except Exception as e:
-        logging.warning("ytmusicapi wheel install failed: %s", e)
+        logging.warning("%s wheel install failed: %s", name, e)
         return False
+
+def _install_ytmusicapi_wheel():
+    """Install ytmusicapi (and requests, if missing) into BIN_DIR without pip.
+    Returns True on success."""
+    import importlib
+    if BIN_DIR not in sys.path:
+        sys.path.insert(0, BIN_DIR)
+    try:
+        import requests  # noqa: F401  (ytmusicapi's only dependency)
+    except ImportError:
+        logging.warning("Python 'requests' not found; installing it into %s", BIN_DIR)
+        if not all(_install_pinned_wheel(n, v) for n, v in _REQUESTS_WHEELS):
+            return False
+        importlib.invalidate_caches()
+        try:
+            import requests  # noqa: F401,F811
+        except ImportError as e:
+            logging.warning("requests still not importable: %s", e)
+            return False
+    if not _install_pinned_wheel("ytmusicapi", _YTMUSICAPI_VERSION):
+        return False
+    importlib.invalidate_caches()
+    return True
 
 def _init_ytm_auth(headers_raw):
     """Initialize ytmusicapi with raw browser headers string."""
