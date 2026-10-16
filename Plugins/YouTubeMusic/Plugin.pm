@@ -811,14 +811,17 @@ sub _personal_home_menu {
     });
 }
 
-# Just the Speed dial section of the signed-in home page.
+# Just the Speed dial section of the signed-in home page. The phone app calls
+# it "Speed dial"; the web client the plugin talks to calls the same section
+# "Listen again", so accept either (Speed dial first).
 sub _speed_dial_menu {
     my ($client, $callback) = @_;
     Plugins::YouTubeMusic::API->getLibraryHome(sub {
         my $sections = _library_home_sections(shift);
         return $callback->($sections) if ref $sections eq 'HASH';
 
-        my ($dial) = grep { ($_->{title} // '') =~ /speed\s*dial/i } @$sections;
+        my ($dial) = (grep({ ($_->{title} // '') =~ /speed\s*dial/i } @$sections),
+                      grep({ ($_->{title} // '') =~ /listen\s*again/i } @$sections));
         return $callback->({ items => [{ name => 'Speed dial is not available for this account yet', type => 'text' }] })
             unless $dial;
         $callback->({ items => _items_to_menu($client, $dial->{items}, { playall => 1 }) });
