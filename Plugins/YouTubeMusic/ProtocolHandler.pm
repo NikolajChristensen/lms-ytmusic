@@ -38,7 +38,6 @@ my $log   = Slim::Utils::Log->addLogCategory({
 sub isRemote        { 1 }
 sub isAudio         { 1 }
 sub isAudioURL      { 1 }
-sub canSeek         { 0 }
 sub canDirectStream { 0 }
 sub songBytes       {}
 
@@ -71,6 +70,29 @@ sub _init_audio_format {
 sub formatOverride  { $_audio_format }
 sub getFormatForURL { $_audio_format }
 sub contentType     { $_audio_format }
+
+# Seeking. The proxy always serves constant-bitrate 192 kbps MP3, so a time
+# maps straight to a byte offset. LMS requests that offset with
+# "Range: bytes=N-" (Slim::Player::Protocols::HTTP::requestString), fixes up
+# the progress bar, and skips the bytes itself if the proxy can't honour the
+# range yet. AAC/FLAC fallbacks have no fixed bytes-per-second, so they
+# stay non-seekable.
+#
+# Deliberately not conditional on the duration being known: Slim::Player::Song
+# caches this answer for the whole track, and the duration often arrives a
+# moment after playback starts, so a duration check here could leave a track
+# permanently unseekable. The byte offset doesn't need the duration anyway.
+use constant SEEK_BITRATE => 192_000;
+
+sub canSeek { $_audio_format eq 'mp3' ? 1 : 0 }
+
+sub getSeekData {
+    my ($class, $client, $song, $newtime) = @_;
+    return {
+        sourceStreamOffset => int(SEEK_BITRATE / 8 * $newtime),
+        timeOffset         => $newtime,
+    };
+}
 
 # Substitute the local proxy stream URL before the base class opens the
 # socket, same pattern used by RadioParadise's protocol handler.
@@ -386,6 +408,23 @@ sub _start_radio {
     });
 }
 
+# The player endpoint behind getSongInfo describes the video, not the
+# release: its thumbnail is a video still, it has no album, and the artist
+# is the channel name. When browse/search already primed the cache with the
+# album's own title, artist and cover, keep those and only fill in gaps.
+sub _merge_song_info {
+    my ($video_id, $info) = @_;
+    my $have = $_metadata_cache{$video_id} || {};
+
+    return $_metadata_cache{$video_id} = {
+        title    => $have->{title}    || $info->{title}     || '',
+        artist   => $have->{artist}   || $info->{artist}    || '',
+        album    => $have->{album}    || $info->{album}     || '',
+        duration => $info->{duration} || $have->{duration}  || 0,
+        cover    => $have->{cover}    || $info->{thumbnail} || '',
+    };
+}
+
 sub _fetch_metadata {
     my ($video_id, $song) = @_;
 
@@ -393,18 +432,12 @@ sub _fetch_metadata {
         my $info = shift;
         return unless $info && ref $info eq 'HASH';
 
-        $_metadata_cache{$video_id} = {
-            title    => $info->{title}     || '',
-            artist   => $info->{artist}    || '',
-            album    => $info->{album}     || '',
-            duration => $info->{duration}  || 0,
-            cover    => $info->{thumbnail} || '',
-        };
+        my $meta = _merge_song_info($video_id, $info);
 
         my $track = $song->currentTrack();
-        $track->title($info->{title})        if $info->{title};
-        $track->secs($info->{duration})      if $info->{duration};
-        $track->coverurl($info->{thumbnail}) if $info->{thumbnail};
+        $track->title($meta->{title})       if $meta->{title};
+        $track->secs($meta->{duration})     if $meta->{duration};
+        $track->coverurl($meta->{cover})    if $meta->{cover};
         $track->update();
 
         Slim::Control::Request::notifyFromArray(undef, ['newmetadata']);
@@ -427,13 +460,7 @@ sub getMetadataFor {
         Plugins::YouTubeMusic::API->getSongInfo($vid, sub {
             my $info = shift;
             return unless $info && ref $info eq 'HASH';
-            $_metadata_cache{$vid} = {
-                title    => $info->{title}     || '',
-                artist   => $info->{artist}    || '',
-                album    => $info->{album}     || '',
-                duration => $info->{duration}  || 0,
-                cover    => $info->{thumbnail} || '',
-            };
+            _merge_song_info($vid, $info);
             Slim::Control::Request::notifyFromArray(undef, ['newmetadata']);
         });
     }

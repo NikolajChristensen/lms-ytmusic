@@ -2,6 +2,7 @@
 import argparse
 import json
 import logging
+import re
 import shutil
 import subprocess
 import sys
@@ -870,6 +871,47 @@ def browse_olak_playlist(playlist_id):
     _cache_set(cache_key, result)
     return result
 
+def _album_header(data):
+    """Return the musicResponsiveHeaderRenderer of an album page, or {}."""
+    tabs = (
+        data.get("contents", {})
+            .get("twoColumnBrowseResultsRenderer", {})
+            .get("tabs", [])
+    )
+    for tab in tabs:
+        sections = (
+            tab.get("tabRenderer", {})
+               .get("content", {})
+               .get("sectionListRenderer", {})
+               .get("contents", [])
+        )
+        for section in sections:
+            header = section.get("musicResponsiveHeaderRenderer")
+            if header:
+                return header
+    return {}
+
+def _fill_album_track_metadata(data, items):
+    """Album track rows carry only title, play count and duration: the artist
+    column is empty on single-artist albums, the third column (parsed as
+    "album") is the play count, and there is no per-track artwork. Take the
+    album title, artist and cover from the page header instead."""
+    header = _album_header(data)
+    if not header:
+        return
+    album  = _text(header, "title")
+    artist = _text(header, "straplineTextOne")
+    thumb  = _thumb_from_renderer(header)
+    for item in items:
+        if item.get("type") != "song":
+            continue
+        if album:
+            item["album"] = album
+        if artist and not item.get("artist"):
+            item["artist"] = artist
+        if thumb and not item.get("thumbnail"):
+            item["thumbnail"] = thumb
+
 def browse_playlist(browse_id):
     cache_key = f"playlist:{browse_id}"
     cached = _cache_get(cache_key)
@@ -913,6 +955,9 @@ def browse_playlist(browse_id):
                         else:
                             items.extend(_shelf_items({"contents": [entry]}))
 
+    if browse_id.startswith("MPREb_"):
+        _fill_album_track_metadata(data, items)
+
     result = {"browseId": browse_id, "items": items}
     _cache_set(cache_key, result)
     return result
@@ -938,10 +983,53 @@ def browse_artist(browse_id):
             continue
         sec_title = _text(
             target.get("header", {}).get("musicCarouselShelfBasicHeaderRenderer", {})
-        )
-        items = _shelf_items(target)
+        ) or _text(target)
+        # Top songs is a list shelf; Albums, Singles, Videos, Fans might also
+        # like etc. are carousels of musicTwoRowItemRenderer cards.
+        items = _shelf_items(target) if shelf else _parse_two_row_items(target)
+        for item in items:
+            if item.get("type") == "artist":
+                item.setdefault("name", item.get("title", ""))
+            elif item.get("type") == "album":
+                item.setdefault("year", item.get("subtitle", ""))
         if items:
-            result["sections"].append({"title": sec_title, "items": items})
+            sec = {"title": sec_title, "items": items}
+            more = _artist_section_more(target)
+            if more:
+                sec["more"] = more
+            result["sections"].append(sec)
+    _cache_set(cache_key, result)
+    return result
+
+def _artist_section_more(carousel):
+    """The Albums and Singles & EPs carousels show ~10 cards; their header
+    links to the artist's full discography grid (an MPAD... browse ID)."""
+    header = carousel.get("header", {}).get("musicCarouselShelfBasicHeaderRenderer", {})
+    for ep in (
+        header.get("title", {}).get("runs", [{}])[0].get("navigationEndpoint", {}),
+        header.get("moreContentButton", {}).get("buttonRenderer", {}).get("navigationEndpoint", {}),
+    ):
+        browse_ep = ep.get("browseEndpoint", {})
+        if browse_ep.get("browseId", "").startswith("MPAD"):
+            return {"browseId": browse_ep["browseId"], "params": browse_ep.get("params", "")}
+    return None
+
+def browse_artist_discography(browse_id, params):
+    """Full album or singles list behind an artist page's "More" link."""
+    cache_key = f"discography:{browse_id}:{params}"
+    cached = _cache_get(cache_key)
+    if cached is not None:
+        return cached
+    data  = _post("browse", {"browseId": browse_id, "params": params})
+    items = []
+    for section in _single_col_sections(data):
+        grid = section.get("gridRenderer", {})
+        if grid:
+            items.extend(_parse_two_row_items({"contents": grid.get("items", [])}))
+    for item in items:
+        if item.get("type") == "album":
+            item.setdefault("year", item.get("subtitle", ""))
+    result = {"items": items}
     _cache_set(cache_key, result)
     return result
 
@@ -2129,6 +2217,11 @@ class _Handler(BaseHTTPRequestHandler):
                 if not bid:
                     return self._error("Missing browseId", 400)
                 self._send_json(browse_artist(bid))
+            elif path == "/artist/discography":
+                bid = p("browseId")
+                if not bid:
+                    return self._error("Missing browseId", 400)
+                self._send_json(browse_artist_discography(bid, p("params")))
             elif path == "/song":
                 vid = p("videoId")
                 if not vid:
@@ -2167,17 +2260,33 @@ class _Handler(BaseHTTPRequestHandler):
                 if not vid:
                     return self._error("Missing videoId", 400)
 
+                # LMS seeks with "Range: bytes=N-" (it always sends one,
+                # usually bytes=0-). Both paths below honour it.
+                m     = re.match(r"bytes=(\d+)-", self.headers.get("Range", ""))
+                start = int(m.group(1)) if m else 0
+
                 cached_path = get_prefetched_path(vid)
                 if cached_path:
                     try:
                         size = os.path.getsize(cached_path)
-                        self.send_response(200)
+                        if start >= size:
+                            self.send_response(416)
+                            self.send_header("Content-Range", f"bytes */{size}")
+                            self.send_header("Content-Length", "0")
+                            self.send_header("Connection", "close")
+                            self.end_headers()
+                            return
+                        self.send_response(206 if start else 200)
                         self.send_header("Content-Type", _AUDIO_MIME)
-                        self.send_header("Content-Length", str(size))
+                        self.send_header("Content-Length", str(size - start))
+                        if start:
+                            self.send_header("Content-Range", f"bytes {start}-{size - 1}/{size}")
+                        self.send_header("Accept-Ranges", "bytes")
                         self.send_header("Cache-Control", "no-cache")
                         self.send_header("Connection", "close")
                         self.end_headers()
                         with open(cached_path, "rb") as f:
+                            f.seek(start)
                             while True:
                                 chunk = f.read(65536)
                                 if not chunk:
@@ -2197,9 +2306,16 @@ class _Handler(BaseHTTPRequestHandler):
                 if not cached:
                     start_prefetch(vid)
                 # Send HTTP headers immediately — don't make LMS wait for yt-dlp to start
+                # For a seek into a track that is still downloading, start at
+                # the requested offset; the loop below waits for the download
+                # (which runs far faster than real time) to get there. The
+                # total length isn't known yet, so Content-Range carries only
+                # the start - which is the part LMS checks.
                 try:
-                    self.send_response(200)
+                    self.send_response(206 if start else 200)
                     self.send_header("Content-Type", _AUDIO_MIME)
+                    if start:
+                        self.send_header("Content-Range", f"bytes {start}-")
                     self.send_header("Cache-Control", "no-cache")
                     self.send_header("Connection", "close")
                     self.send_header("icy-metaint", "0")
@@ -2229,7 +2345,7 @@ class _Handler(BaseHTTPRequestHandler):
                     return
                 if os.path.exists(open_path) and os.path.getsize(open_path) > 0:
                     try:
-                        position = 0
+                        position = start
                         while True:
                             current = tmp_path if os.path.exists(tmp_path) else done_path
                             if not os.path.exists(current):
