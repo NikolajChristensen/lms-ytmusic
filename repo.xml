@@ -4,14 +4,14 @@
     <title lang="EN">YouTube Music for LMS (NikolajChristensen fork)</title>
   </details>
   <plugins>
-    <plugin name="YouTubeMusic" version="1.4.7.3" minTarget="9.0" maxTarget="*">
+    <plugin name="YouTubeMusic" version="1.4.7.4" minTarget="9.0" maxTarget="*">
       <title lang="EN">YouTube Music</title>
       <desc lang="EN">Browse, search, and stream YouTube Music to your Squeezebox players.</desc>
-      <changes lang="EN">With a YouTube Music cookie set: Speed dial, and Albums, Artists and Home under My Library. The login library now installs without pip (needs python3-requests).</changes>
+      <changes lang="EN">Security: the helper now listens only inside the server (127.0.0.1); the settings page goes through Lyrion, so no firewall rule for port 9876 is needed. Includes 1.4.7.3 (Speed dial, library Albums/Artists/Home).</changes>
       <creator>schmij97, NikolajChristensen</creator>
       <category>musicservices</category>
-      <url>https://github.com/NikolajChristensen/lms-ytmusic/releases/download/v1.4.7.3/YouTubeMusic-1.4.7.3.zip</url>
-      <sha>1826d7c6eef566757c195de3d3b6420392f7ad4f</sha>
+      <url>https://github.com/NikolajChristensen/lms-ytmusic/releases/download/v1.4.7.4/YouTubeMusic-1.4.7.4.zip</url>
+      <sha>f3de1fad88547950bb9ec4a04b7bdbfd8b2de192</sha>
     </plugin>
   </plugins>
 </extensions>
