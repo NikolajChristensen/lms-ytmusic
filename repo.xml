@@ -4,14 +4,14 @@
     <title lang="EN">YouTube Music for LMS (NikolajChristensen fork)</title>
   </details>
   <plugins>
-    <plugin name="YouTubeMusic" version="1.4.8.6" minTarget="9.0" maxTarget="*">
+    <plugin name="YouTubeMusic" version="1.4.8.7" minTarget="9.0" maxTarget="*">
       <title lang="EN">YouTube Music</title>
       <desc lang="EN">Browse, search, and stream YouTube Music to your Squeezebox players.</desc>
-      <changes lang="EN">Speed dial and other personal lists keep a stable order for a few minutes, so tapping a tile opens that tile (YouTube reshuffles them on every request). Includes upstream changes up to now.</changes>
+      <changes lang="EN">The top-level "My Playlists" (playlists saved by hand in settings) is now "Saved Playlists" and only shows once one is saved, so it no longer looks like a second copy of My Library > My Playlists.</changes>
       <creator>schmij97, NikolajChristensen</creator>
       <category>musicservices</category>
-      <url>https://github.com/NikolajChristensen/lms-ytmusic/releases/download/v1.4.8.6/YouTubeMusic-1.4.8.6.zip</url>
-      <sha>ba57101c598e34db1cb5ad5f5044ae168258d4c5</sha>
+      <url>https://github.com/NikolajChristensen/lms-ytmusic/releases/download/v1.4.8.7/YouTubeMusic-1.4.8.7.zip</url>
+      <sha>107e1e3ade2c27e77a36286378f3b6e3758e5974</sha>
     </plugin>
   </plugins>
 </extensions>
