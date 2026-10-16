@@ -107,55 +107,6 @@ def _install_ytmusicapi_wheel():
     importlib.invalidate_caches()
     return True
 
-def _normalize_pasted_headers(raw):
-    """Turn pasted browser request headers into the three ytmusicapi needs.
-
-    Browsers copy headers in different shapes: "Name: value" per line
-    (Firefox raw view, older Chrome "Copy request headers"), or - when the
-    current Chrome DevTools table is selected with the mouse - the name and
-    the value on separate lines, including HTTP/2 pseudo-headers such as
-    ":authority". Passed through as-is, ytmusicapi turns the pseudo-header
-    values into bogus header names and keeps Chrome's capitalised
-    Accept-Encoding (br, zstd) / Content-Length, so YouTube's replies can't be
-    decoded ("Expecting value: line 1 column 1").
-
-    Only cookie, x-goog-authuser and authorization matter: ytmusicapi
-    recognises browser auth by an authorization header containing
-    SAPISIDHASH and regenerates its value from the cookie on every request.
-    Returns the normalised block, or the input unchanged if no cookie is found
-    (so ytmusicapi reports what is missing).
-    """
-    wanted = {"cookie": None, "x-goog-authuser": None, "authorization": None}
-    pending = None
-    for line in (raw or "").replace("\r\n", "\n").replace("\r", "\n").split("\n"):
-        line = line.strip()
-        if not line:
-            continue
-        if pending is not None:                      # value line of a "name" line
-            if pending in wanted and wanted[pending] is None:
-                wanted[pending] = line
-            pending = None
-            continue
-        m = re.match(r"^(:?[A-Za-z0-9-]+):(?:\s+(.*))?$", line)
-        if m and m.group(2):                         # "Name: value"
-            name = m.group(1).lower()
-            if name in wanted and wanted[name] is None:
-                wanted[name] = m.group(2).strip()
-        elif m or re.match(r"^:?[A-Za-z0-9-]+$", line):  # "Name:" or "Name" alone
-            pending = (m.group(1) if m else line).lower()
-    if not wanted["cookie"]:
-        return (raw or "").strip()
-    auth = wanted["authorization"] or ""
-    if "SAPISIDHASH" not in auth:
-        auth = "SAPISIDHASH 0_0"                     # marker only; value is regenerated
-    logging.warning("YouTube Music headers: using cookie, x-goog-authuser%s",
-                    "" if wanted["x-goog-authuser"] else " (defaulted to 0)")
-    return "\n".join([
-        f"cookie: {wanted['cookie']}",
-        f"x-goog-authuser: {wanted['x-goog-authuser'] or '0'}",
-        f"authorization: {auth}",
-    ])
-
 def _init_ytm_auth(headers_raw):
     """Initialize ytmusicapi with raw browser headers string."""
     global _ytm_auth, _ytm_cookie
@@ -209,6 +160,57 @@ def _init_ytm_auth(headers_raw):
         _ytm_auth = None
         _ytm_cookie = None
         return False
+
+
+
+def _normalize_pasted_headers(raw):
+    """Turn pasted browser request headers into the three ytmusicapi needs.
+
+    Browsers copy headers in different shapes: "Name: value" per line
+    (Firefox raw view, older Chrome "Copy request headers"), or - when the
+    current Chrome DevTools table is selected with the mouse - the name and
+    the value on separate lines, including HTTP/2 pseudo-headers such as
+    ":authority". Passed through as-is, ytmusicapi turns the pseudo-header
+    values into bogus header names and keeps Chrome's capitalised
+    Accept-Encoding (br, zstd) / Content-Length, so YouTube's replies can't be
+    decoded ("Expecting value: line 1 column 1").
+
+    Only cookie, x-goog-authuser and authorization matter: ytmusicapi
+    recognises browser auth by an authorization header containing
+    SAPISIDHASH and regenerates its value from the cookie on every request.
+    Returns the normalised block, or the input unchanged if no cookie is found
+    (so ytmusicapi reports what is missing).
+    """
+    wanted = {"cookie": None, "x-goog-authuser": None, "authorization": None}
+    pending = None
+    for line in (raw or "").replace("\r\n", "\n").replace("\r", "\n").split("\n"):
+        line = line.strip()
+        if not line:
+            continue
+        if pending is not None:                      # value line of a "name" line
+            if pending in wanted and wanted[pending] is None:
+                wanted[pending] = line
+            pending = None
+            continue
+        m = re.match(r"^(:?[A-Za-z0-9-]+):(?:\s+(.*))?$", line)
+        if m and m.group(2):                         # "Name: value"
+            name = m.group(1).lower()
+            if name in wanted and wanted[name] is None:
+                wanted[name] = m.group(2).strip()
+        elif m or re.match(r"^:?[A-Za-z0-9-]+$", line):  # "Name:" or "Name" alone
+            pending = (m.group(1) if m else line).lower()
+    if not wanted["cookie"]:
+        return (raw or "").strip()
+    auth = wanted["authorization"] or ""
+    if "SAPISIDHASH" not in auth:
+        auth = "SAPISIDHASH 0_0"                     # marker only; value is regenerated
+    logging.warning("YouTube Music headers: using cookie, x-goog-authuser%s",
+                    "" if wanted["x-goog-authuser"] else " (defaulted to 0)")
+    return "\n".join([
+        f"cookie: {wanted['cookie']}",
+        f"x-goog-authuser: {wanted['x-goog-authuser'] or '0'}",
+        f"authorization: {auth}",
+    ])
 
 
 _CACHE = {}
