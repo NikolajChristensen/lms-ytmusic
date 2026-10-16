@@ -289,14 +289,36 @@ def _duration_to_secs(d):
         pass
     return 0
 
+_DURATION_RE = re.compile(r"^\d+:\d{2}(:\d{2})?$")
+_PLAYS_RE    = re.compile(r"\b(plays|views)$", re.I)
+
+def _col_texts(renderer, col_idx):
+    """All run texts of a flex column, without the " • " separators."""
+    try:
+        runs = renderer["flexColumns"][col_idx]["musicResponsiveListItemFlexColumnRenderer"]["text"].get("runs", [])
+    except (IndexError, KeyError):
+        return []
+    return [t for t in (x.get("text", "").strip() for x in runs) if t and t != "\u2022"]
+
 def _parse_song(r):
     video_id = _video_id_from_overlay(r)
+    # Search results put "Artist • Album • 3:52" in the second column and
+    # the play count in the third; album pages and charts use other layouts.
+    second   = _col_texts(r, 1)
+    album    = _col(r, 2)
+    duration = _fixed_col(r, 0) or _col(r, 3) or _col(r, 4)
+    if _PLAYS_RE.search(album):
+        album = ""
+    if second and _DURATION_RE.match(second[-1]):
+        duration = duration or second[-1]
+        if not album and len(second) >= 3:
+            album = second[-2]
     return {
         "type":      "song",
         "title":     _col(r, 0),
         "artist":    _col(r, 1),
-        "album":     _col(r, 2),
-        "duration":  _duration_to_secs(_fixed_col(r, 0) or _col(r, 3) or _col(r, 4)),
+        "album":     album,
+        "duration":  _duration_to_secs(duration),
         "videoId":   video_id,
         "thumbnail": _thumb_from_renderer(r),
         "url":       f"ytm://{video_id}" if video_id else "",
@@ -1079,6 +1101,96 @@ def _fill_album_track_metadata(data, items):
         if thumb and not item.get("thumbnail"):
             item["thumbnail"] = thumb
 
+def _album_track_rows(data):
+    """The raw track rows of an album page, in album order."""
+    sections = (
+        data.get("contents", {})
+            .get("twoColumnBrowseResultsRenderer", {})
+            .get("secondaryContents", {})
+            .get("sectionListRenderer", {})
+            .get("contents", [])
+    )
+    rows = []
+    for section in sections:
+        for entry in section.get("musicShelfRenderer", {}).get("contents", []):
+            r = entry.get("musicResponsiveListItemRenderer")
+            if r:
+                rows.append(r)
+    return rows
+
+def _norm_title(t):
+    return re.sub(r"\s+", " ", (t or "").lower()).strip()
+
+def _find_replacement_track(artist, title, duration, album=""):
+    """A playable copy of an album track that YouTube greys out.
+
+    When a release is superseded (re-issue, artist renamed, ...), the old
+    album page keeps listing its tracks but greys them out; their video IDs
+    are dead ("Video unavailable"). The YouTube Music apps quietly play the
+    current release's copy instead. Find it by searching for the song and
+    accepting only a result with the same title (optionally prefixed
+    "Artist - ") and a duration within 5 seconds, which rules out live
+    versions, edits and remixes."""
+    want = _norm_title(title)
+    try:
+        results = search(f"{artist} {title}".strip(), "songs")
+    except Exception as e:
+        logging.warning("replacement search failed for %s: %s", title, e)
+        return None
+    candidates = []
+    for r in results:
+        if r.get("type") != "song" or not r.get("videoId"):
+            continue
+        got = _norm_title(r.get("title"))
+        if got != want and not got.endswith(" - " + want):
+            continue
+        if duration and r.get("duration") and abs(r["duration"] - duration) > 5:
+            continue
+        candidates.append(r)
+    # Prefer a copy on an album of the same name (the re-issue usually is)
+    same_album = [r for r in candidates if album and _norm_title(r.get("album")) == _norm_title(album)]
+    return (same_album or candidates or [None])[0]
+
+def _with_replaced_album_tracks(data, items):
+    """Album items in album order, with greyed-out tracks swapped for a
+    playable copy where one can be found (see _find_replacement_track).
+    Albums without greyed-out tracks are returned unchanged."""
+    rows = _album_track_rows(data)
+    missing = [i for i, r in enumerate(rows) if not _video_id_from_overlay(r)]
+    if not missing:
+        return items
+    header = _album_header(data)
+    artist = _text(header, "straplineTextOne")
+    album  = _text(header, "title")
+    from concurrent.futures import ThreadPoolExecutor
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        found = dict(zip(missing, pool.map(
+            lambda i: _find_replacement_track(
+                artist, _col(rows[i], 0),
+                _duration_to_secs(_fixed_col(rows[i], 0)), album),
+            missing)))
+    by_vid = {it.get("videoId"): it for it in items if it.get("videoId")}
+    out = []
+    for i, r in enumerate(rows):
+        vid = _video_id_from_overlay(r)
+        if vid:
+            if vid in by_vid:
+                out.append(by_vid[vid])
+            continue
+        rep = found.get(i)
+        if rep:
+            out.append({
+                "type": "song", "videoId": rep["videoId"], "url": f"ytm://{rep['videoId']}",
+                "title": _col(r, 0), "artist": "", "album": "",
+                "duration": _duration_to_secs(_fixed_col(r, 0)) or rep.get("duration", 0),
+                "thumbnail": "",
+            })
+    logging.info("album: %d greyed-out track(s), %d replaced", len(missing), sum(1 for v in found.values() if v))
+    # keep anything the page had outside the track shelf (none expected)
+    seen = {it.get("videoId") for it in out}
+    out.extend(it for it in items if it.get("videoId") not in seen)
+    return out
+
 def browse_playlist(browse_id):
     cache_key = f"playlist:{browse_id}"
     cached = _cache_get(cache_key)
@@ -1123,6 +1235,7 @@ def browse_playlist(browse_id):
                             items.extend(_shelf_items({"contents": [entry]}))
 
     if browse_id.startswith("MPREb_"):
+        items = _with_replaced_album_tracks(data, items)
         _fill_album_track_metadata(data, items)
 
     result = {"browseId": browse_id, "items": items}
