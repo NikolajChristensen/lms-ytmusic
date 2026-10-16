@@ -153,6 +153,7 @@ def _init_ytm_auth(headers_raw):
         auth_str = setup(headers_raw=cleaned)
         _ytm_auth = YTMusic(auth_str)
         _ytm_cookie = headers_raw.strip()
+        _STABLE.clear()
         logging.info("ytmusicapi authenticated successfully")
         return True
     except Exception as e:
@@ -229,6 +230,24 @@ def _cache_get(key):
     if entry and (time.time() - entry[0]) < _CACHE_TTL:
         return entry[1]
     return None
+
+# Personal lists (home/Speed dial, liked songs, library...) are held for a
+# while. LMS menus navigate by position and re-fetch the parent list on every
+# step, and YouTube returns these lists in a slightly different order on each
+# request (the home page reshuffles its sections), so without this a tap could
+# open a different tile than the one tapped. Errors aren't kept, and a new
+# login clears it.
+_STABLE = {}
+_STABLE_TTL = 600  # seconds
+
+def _stable(key, fetch):
+    entry = _STABLE.get(key)
+    if entry and (time.time() - entry[0]) < _STABLE_TTL:
+        return entry[1]
+    value = fetch()
+    if isinstance(value, dict) and not value.get("error"):
+        _STABLE[key] = (time.time(), value)
+    return value
 
 def _cache_set(key, value):
     _CACHE[key] = (time.time(), value)
@@ -2622,25 +2641,25 @@ class _Handler(BaseHTTPRequestHandler):
                 self._send_json(get_song_info(vid))
 
             elif path == "/library/liked":
-                self._send_json(get_liked_songs())
+                self._send_json(_stable("liked", get_liked_songs))
 
             elif path == "/library/playlists":
-                self._send_json(get_library_playlists())
+                self._send_json(_stable("playlists", get_library_playlists))
 
             elif path == "/library/songs":
-                self._send_json(get_library_songs())
+                self._send_json(_stable("songs", get_library_songs))
 
             elif path == "/library/history":
-                self._send_json(get_history())
+                self._send_json(_stable("history", get_history))
 
             elif path == "/library/home":
-                self._send_json(get_personal_home())
+                self._send_json(_stable("home", get_personal_home))
 
             elif path == "/library/albums":
-                self._send_json(get_library_albums())
+                self._send_json(_stable("albums", get_library_albums))
 
             elif path == "/library/artists":
-                self._send_json(get_library_artists())
+                self._send_json(_stable("artists", get_library_artists))
 
             elif path == "/auth/status":
                 yt = _get_ytm_auth()
