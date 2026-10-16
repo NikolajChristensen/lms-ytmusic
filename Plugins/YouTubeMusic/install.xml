@@ -1,8 +1,8 @@
-<?xml version="1.4.6"?>
+<?xml version="1.0"?>
 <extension>
     <name>PLUGIN_YOUTUBEMUSIC</name>
     <module>Plugins::YouTubeMusic::Plugin</module>
-    <version>1.4.7</version>
+    <version>1.4.7.1</version>
     <description>PLUGIN_YOUTUBEMUSIC_DESC</description>
     <icon>plugins/YouTubeMusic/html/YouTubeMusic_svg.png</icon>
     <iconsvg>plugins/YouTubeMusic/html/YouTubeMusic.svg</iconsvg>
