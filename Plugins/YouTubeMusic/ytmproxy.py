@@ -2170,8 +2170,13 @@ def stream_audio(video_id):
     _t1 = _time.monotonic()
     _log_fn = logging.warning if audio_url else (logging.info if _ydl_available is False else logging.warning)
     _log_fn("PREFETCH_YDL videoId=%s extraction=%.2fs url=%s", video_id, _t1-_t0, "OK" if audio_url else "FAIL")
-    # Use already-resolved CDN URL for subprocess fallback — avoids second YouTube extraction
-    ytdlp_url = audio_url or url
+    # The fallback always starts from the watch page. A CDN URL from the
+    # persistent extractor can be refused (HTTP 403) for a plain download -
+    # that is usually why we end up here - and handing that same URL to the
+    # yt-dlp subprocess fails the same way, so the track was skipped. A fresh
+    # extraction lets yt-dlp's own downloader fetch it, at the cost of one
+    # more extraction only when the fast path has already failed.
+    ytdlp_url = url
     _NODE_PATH = _find_node()
     ytdlp_cmd = [
         ytdlp,
@@ -2186,7 +2191,6 @@ def stream_audio(video_id):
         "--http-chunk-size", "1M",
         "-f", "bestaudio[ext=m4a]/bestaudio[ext=mp3]/bestaudio",
         *(["--js-runtimes", f"node:{_NODE_PATH}"] if _NODE_PATH else ["--js-runtimes", "node"]),
-        "--extractor-args", "youtube:player_client=web_embedded",
         "--cache-dir", os.path.join(BIN_DIR, "ytdlp_cache"),
         "--add-header", "User-Agent:com.google.android.youtube/17.29.34",
         "-o", "-",
@@ -2234,33 +2238,45 @@ def stream_audio(video_id):
         logging.info("Persistent YDL not available for %s, using subprocess", video_id)
     logging.info("Streaming videoId=%s", video_id)
 
-    ytdlp_proc = subprocess.Popen(
-        ytdlp_cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL
-    )
-    ffmpeg_proc = subprocess.Popen(
-        ffmpeg_cmd,
-        stdin=ytdlp_proc.stdout,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.DEVNULL,
-    )
-    ytdlp_proc.stdout.close()
+    # Two attempts: the embedded-player client first (as before), then
+    # yt-dlp's own client choice. YouTube refuses the embedded client for some
+    # content, and extraction is occasionally flaky ("unable to extract yt
+    # initial data"), so a single attempt left such tracks silent.
+    for client_args in (["--extractor-args", "youtube:player_client=web_embedded"], []):
+        cmd = ytdlp_cmd[:-1] + client_args + ytdlp_cmd[-1:]
+        ytdlp_proc = subprocess.Popen(
+            cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL
+        )
+        ffmpeg_proc = subprocess.Popen(
+            ffmpeg_cmd,
+            stdin=ytdlp_proc.stdout,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+        )
+        ytdlp_proc.stdout.close()
 
-    try:
-        while True:
-            chunk = ffmpeg_proc.stdout.read(65536)
-            if not chunk:
-                break
-            yield chunk
-    finally:
-        for proc in (ffmpeg_proc, ytdlp_proc):
-            try:
-                proc.terminate()
-                proc.wait(timeout=2)
-            except Exception:
+        sent = 0
+        try:
+            while True:
+                chunk = ffmpeg_proc.stdout.read(65536)
+                if not chunk:
+                    break
+                sent += len(chunk)
+                yield chunk
+        finally:
+            for proc in (ffmpeg_proc, ytdlp_proc):
                 try:
-                    proc.kill()
+                    proc.terminate()
+                    proc.wait(timeout=2)
                 except Exception:
-                    pass
+                    try:
+                        proc.kill()
+                    except Exception:
+                        pass
+        if sent:
+            return
+        logging.warning("yt-dlp subprocess (%s) produced 0 bytes for %s",
+                        "web_embedded" if client_args else "default clients", video_id)
 
 
 class _Handler(BaseHTTPRequestHandler):
