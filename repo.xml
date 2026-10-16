@@ -4,14 +4,14 @@
     <title lang="EN">YouTube Music for LMS (NikolajChristensen fork)</title>
   </details>
   <plugins>
-    <plugin name="YouTubeMusic" version="1.4.7.5" minTarget="9.0" maxTarget="*">
+    <plugin name="YouTubeMusic" version="1.4.7.6" minTarget="9.0" maxTarget="*">
       <title lang="EN">YouTube Music</title>
       <desc lang="EN">Browse, search, and stream YouTube Music to your Squeezebox players.</desc>
-      <changes lang="EN">Speed dial now also finds the section the web calls "Listen again". Includes 1.4.7.4: the helper listens only inside the server, and the settings page goes through Lyrion.</changes>
+      <changes lang="EN">Fix YouTube Music login failing ("Expecting value") when request headers are copied from current Chrome; only the Cookie and X-Goog-Authuser lines are used now. Speed dial shows the real error if the home page cannot be loaded. Updated instructions for copying headers.</changes>
       <creator>schmij97, NikolajChristensen</creator>
       <category>musicservices</category>
-      <url>https://github.com/NikolajChristensen/lms-ytmusic/releases/download/v1.4.7.5/YouTubeMusic-1.4.7.5.zip</url>
-      <sha>ea2c046c065522021b97dc6ada0dc8e1360bab06</sha>
+      <url>https://github.com/NikolajChristensen/lms-ytmusic/releases/download/v1.4.7.6/YouTubeMusic-1.4.7.6.zip</url>
+      <sha>3d8aef0dc43c0ad0a8a5e5ee70b20f81e85ea681</sha>
     </plugin>
   </plugins>
 </extensions>
