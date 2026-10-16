@@ -42,8 +42,18 @@ mkdir -p dist
 rm -f dist/YouTubeMusic-*.zip
 rm -rf "$PLUGIN_DIR/__pycache__"
 # Same layout as upstream's zips: Plugins/YouTubeMusic/... at the root.
-# -X drops uid/gid and platform extra fields.
-zip -qrX "$ZIP" "$PLUGIN_DIR" -x '*/__pycache__/*' '*.pyc' '*.orig' '*.swp' '*~' '*/.DS_Store'
+#
+# Reproducible: the same tree always gives the same zip and SHA-1, so a dry
+# run and --publish agree. Every entry's mtime is pinned to the last commit's
+# time (in UTC, since zip stores local time), entries go in in sorted order,
+# and -X drops uid/gid and platform extra fields.
+EPOCH=$(git log -1 --format=%ct)
+FILES=$(find "$PLUGIN_DIR" \( -name __pycache__ -o -name '*.pyc' -o -name '*.orig' -o -name '*.swp' \
+	-o -name '*~' -o -name .DS_Store \) -prune -o -print | LC_ALL=C sort)
+# shellcheck disable=SC2086
+touch -h -d "@$EPOCH" $FILES
+# shellcheck disable=SC2086
+printf '%s\n' $FILES | TZ=UTC zip -qX -@ "$ZIP"
 unzip -l "$ZIP"
 
 SHA=$(sha1sum "$ZIP" | cut -d' ' -f1)
