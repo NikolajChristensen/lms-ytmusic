@@ -77,8 +77,12 @@ def _init_ytm_auth(headers_raw):
             from ytmusicapi import YTMusic, setup
             logging.info("ytmusicapi installed successfully")
         from ytmusicapi import YTMusic, setup
+        # Clean headers — remove Windows line endings and normalize whitespace
+        cleaned = headers_raw.strip().replace('\r\n', '\n').replace('\r', '\n')
+        # Remove lines that are just whitespace
+        cleaned = '\n'.join(line for line in cleaned.splitlines() if line.strip())
         # setup() converts raw headers to the format ytmusicapi needs
-        auth_str = setup(headers_raw=headers_raw.strip())
+        auth_str = setup(headers_raw=cleaned)
         _ytm_auth = YTMusic(auth_str)
         _ytm_cookie = headers_raw.strip()
         logging.info("ytmusicapi authenticated successfully")
