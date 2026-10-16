@@ -1955,14 +1955,14 @@ def _get_ydl():
                 node_path = _find_node()
                 js_runtimes = {'node': {'path': node_path}} if node_path else {'node': {}}
                 ydl_opts = {
-                    'format': 'bestaudio[ext=m4a]/bestaudio[ext=mp3]/bestaudio',
+                    'format': 'bestaudio',
                     'quiet': True,
                     'no_warnings': True,
                     'no_check_certificates': True,
                     'socket_timeout': 10,
                     'retries': 2,
                     'extractor_retries': 2,
-                    'extractor_args': {'youtube': {'player_client': ['ios']}},
+                    'extractor_args': {'youtube': {'player_client': ['web_embedded']}},
                     'cachedir': os.path.join(BIN_DIR, 'ytdlp_cache'),
                     'js_runtimes': js_runtimes,
                 }
@@ -2186,7 +2186,7 @@ def stream_audio(video_id):
         "--http-chunk-size", "1M",
         "-f", "bestaudio[ext=m4a]/bestaudio[ext=mp3]/bestaudio",
         *(["--js-runtimes", f"node:{_NODE_PATH}"] if _NODE_PATH else ["--js-runtimes", "node"]),
-        "--extractor-args", "youtube:player_client=ios",
+        "--extractor-args", "youtube:player_client=web_embedded",
         "--cache-dir", os.path.join(BIN_DIR, "ytdlp_cache"),
         "--add-header", "User-Agent:com.google.android.youtube/17.29.34",
         "-o", "-",
