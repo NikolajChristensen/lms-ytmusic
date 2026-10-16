@@ -49,6 +49,41 @@ def _get_ytm_auth():
     """Return authenticated YTMusic instance or None."""
     return _ytm_auth
 
+# Pinned so a new ytmusicapi release can't change behaviour underneath us.
+# Its only dependency is requests (Debian: python3-requests).
+_YTMUSICAPI_VERSION = "1.12.3"
+
+def _install_ytmusicapi_wheel():
+    """Download the pinned ytmusicapi wheel from PyPI into BIN_DIR, verifying
+    it against the sha256 PyPI publishes. Returns True on success."""
+    import hashlib, io, zipfile
+    try:
+        import requests  # noqa: F401  (ytmusicapi's only dependency)
+    except ImportError:
+        logging.warning("ytmusicapi needs the Python 'requests' module; "
+                        "on Debian/Ubuntu: apt install python3-requests")
+        return False
+    try:
+        meta_url = f"https://pypi.org/pypi/ytmusicapi/{_YTMUSICAPI_VERSION}/json"
+        with urllib.request.urlopen(meta_url, timeout=20) as resp:
+            meta = json.loads(resp.read())
+        wheel = next(u for u in meta["urls"] if u["filename"].endswith(".whl"))
+        with urllib.request.urlopen(wheel["url"], timeout=60) as resp:
+            data = resp.read()
+        if hashlib.sha256(data).hexdigest() != wheel["digests"]["sha256"]:
+            logging.warning("ytmusicapi wheel checksum mismatch, not installing")
+            return False
+        os.makedirs(BIN_DIR, exist_ok=True)
+        with zipfile.ZipFile(io.BytesIO(data)) as zf:
+            zf.extractall(BIN_DIR)
+        if BIN_DIR not in sys.path:
+            sys.path.insert(0, BIN_DIR)
+        logging.info("ytmusicapi %s installed to %s", _YTMUSICAPI_VERSION, BIN_DIR)
+        return True
+    except Exception as e:
+        logging.warning("ytmusicapi wheel install failed: %s", e)
+        return False
+
 def _init_ytm_auth(headers_raw):
     """Initialize ytmusicapi with raw browser headers string."""
     global _ytm_auth, _ytm_cookie
@@ -57,7 +92,18 @@ def _init_ytm_auth(headers_raw):
         _ytm_cookie = None
         return False
     try:
-        # Auto-install ytmusicapi if not available
+        # Auto-install ytmusicapi if not available. Prefer a verified wheel
+        # in BIN_DIR (no pip needed, system Python untouched); pip is the
+        # fallback.
+        try:
+            from ytmusicapi import YTMusic, setup
+        except ImportError:
+            if BIN_DIR not in sys.path:
+                sys.path.insert(0, BIN_DIR)
+        try:
+            from ytmusicapi import YTMusic, setup
+        except ImportError:
+            _install_ytmusicapi_wheel()
         try:
             from ytmusicapi import YTMusic, setup
         except ImportError:
@@ -476,6 +522,80 @@ def get_history():
         return {"items": items}
     except Exception as e:
         logging.warning("get_history failed: %s", e)
+        return {"error": str(e), "items": []}
+
+def _ytm_thumb(x):
+    thumbs = x.get("thumbnails") or []
+    return thumbs[-1].get("url", "") if thumbs else ""
+
+def _ytm_artists(x):
+    return ", ".join(a.get("name", "") for a in (x.get("artists") or []) if a.get("name"))
+
+def _ytm_item(x):
+    """Map a ytmusicapi home/library entry onto the plugin's item format."""
+    if not isinstance(x, dict):
+        return None
+    thumb = _ytm_thumb(x)
+    bid   = x.get("browseId") or ""
+    if x.get("videoId"):
+        album = x.get("album")
+        return {
+            "type": "song", "videoId": x["videoId"], "url": f"ytm://{x['videoId']}",
+            "title": x.get("title", ""), "artist": _ytm_artists(x),
+            "album": album.get("name", "") if isinstance(album, dict) else "",
+            "duration": x.get("duration_seconds", 0), "thumbnail": thumb,
+        }
+    if bid.startswith("MPRE"):
+        return {"type": "album", "browseId": bid, "title": x.get("title", ""),
+                "artist": _ytm_artists(x), "year": x.get("year", "") or x.get("type", ""),
+                "thumbnail": thumb}
+    if bid.startswith("UC"):
+        name = x.get("title") or x.get("artist") or ""
+        return {"type": "artist", "browseId": bid, "name": name, "title": name, "thumbnail": thumb}
+    pid = x.get("playlistId") or (bid[2:] if bid.startswith("VL") else "")
+    if pid:
+        return {"type": "playlist", "browseId": f"VL{pid}", "title": x.get("title", ""),
+                "count": x.get("count", ""), "thumbnail": thumb, "url": f"ytmplaylist://VL{pid}"}
+    return None
+
+def _ytm_items(rows):
+    return [i for i in (_ytm_item(x) for x in rows or []) if i]
+
+def get_personal_home(limit=20):
+    """The signed-in home page: Speed dial, Listen again, Quick picks, mixes..."""
+    yt = _get_ytm_auth()
+    if not yt:
+        return {"error": "not_authenticated", "sections": []}
+    try:
+        sections = []
+        for sec in yt.get_home(limit=limit):
+            items = _ytm_items(sec.get("contents"))
+            if items:
+                sections.append({"title": sec.get("title") or "", "items": items})
+        return {"sections": sections}
+    except Exception as e:
+        logging.warning("get_home failed: %s", e)
+        return {"error": str(e), "sections": []}
+
+def get_library_albums(limit=500):
+    yt = _get_ytm_auth()
+    if not yt:
+        return {"error": "not_authenticated", "items": []}
+    try:
+        return {"items": _ytm_items(yt.get_library_albums(limit=limit))}
+    except Exception as e:
+        logging.warning("get_library_albums failed: %s", e)
+        return {"error": str(e), "items": []}
+
+def get_library_artists(limit=500):
+    """Artists you subscribe to - the closest thing to 'liked artists'."""
+    yt = _get_ytm_auth()
+    if not yt:
+        return {"error": "not_authenticated", "items": []}
+    try:
+        return {"items": _ytm_items(yt.get_library_subscriptions(limit=limit))}
+    except Exception as e:
+        logging.warning("get_library_subscriptions failed: %s", e)
         return {"error": str(e), "items": []}
 
 def get_library_songs(limit=100):
@@ -2239,6 +2359,15 @@ class _Handler(BaseHTTPRequestHandler):
 
             elif path == "/library/history":
                 self._send_json(get_history())
+
+            elif path == "/library/home":
+                self._send_json(get_personal_home())
+
+            elif path == "/library/albums":
+                self._send_json(get_library_albums())
+
+            elif path == "/library/artists":
+                self._send_json(get_library_artists())
 
             elif path == "/auth/status":
                 yt = _get_ytm_auth()

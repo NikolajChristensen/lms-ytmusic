@@ -545,9 +545,12 @@ sub _top_level {
         },
     );
 
-    # Add My Library section if authenticated
+    # Add Speed dial and My Library if authenticated
     if ($prefs->get('ytm_cookie')) {
         push @items, {
+            name => 'Speed dial',
+            url  => \&_speed_dial_menu,
+        }, {
             name => 'My Library',
             url  => \&_my_library_menu,
         };
@@ -772,7 +775,82 @@ sub _my_library_menu {
             name => 'History',
             url  => \&_history_menu,
         },
+        {
+            name => 'Albums',
+            url  => \&_library_albums_menu,
+        },
+        {
+            name => 'Artists',
+            url  => \&_library_artists_menu,
+        },
+        {
+            name => 'Home',
+            url  => \&_personal_home_menu,
+        },
     ]});
+}
+
+# The signed-in home page, as YouTube Music shows it: Speed dial, Listen
+# again, Quick picks, mixes... Each section opens as its own list.
+sub _personal_home_menu {
+    my ($client, $callback) = @_;
+    Plugins::YouTubeMusic::API->getLibraryHome(sub {
+        my $sections = _library_home_sections(shift);
+        return $callback->($sections) if ref $sections eq 'HASH';
+
+        $callback->({ items => [ map {
+            my $section = $_;
+            {
+                name => $section->{title} || 'More',
+                url  => sub {
+                    my ($c, $cb) = @_;
+                    $cb->({ items => _items_to_menu($c, $section->{items}, { playall => 1 }) });
+                },
+            }
+        } @$sections ] });
+    });
+}
+
+# Just the Speed dial section of the signed-in home page.
+sub _speed_dial_menu {
+    my ($client, $callback) = @_;
+    Plugins::YouTubeMusic::API->getLibraryHome(sub {
+        my $sections = _library_home_sections(shift);
+        return $callback->($sections) if ref $sections eq 'HASH';
+
+        my ($dial) = grep { ($_->{title} // '') =~ /speed\s*dial/i } @$sections;
+        return $callback->({ items => [{ name => 'Speed dial is not available for this account yet', type => 'text' }] })
+            unless $dial;
+        $callback->({ items => _items_to_menu($client, $dial->{items}, { playall => 1 }) });
+    });
+}
+
+# Returns the section list, or a ready-made menu explaining why there is none.
+sub _library_home_sections {
+    my $data = shift;
+    return { items => [{ name => 'Could not load YouTube Music home', type => 'text' }] }
+        unless $data && ref $data eq 'HASH';
+    return { items => [{ name => 'Not authenticated - please add your YouTube Music headers in plugin settings', type => 'text' }] }
+        if ($data->{error} // '') eq 'not_authenticated';
+    return $data->{sections} || [];
+}
+
+sub _library_albums_menu {
+    my ($client, $callback) = @_;
+    Plugins::YouTubeMusic::API->getLibraryAlbums(sub {
+        my $data = shift;
+        return $callback->({ items => [] }) unless $data && ref $data eq 'HASH';
+        $callback->({ items => _items_to_menu($client, $data->{items} // []) });
+    });
+}
+
+sub _library_artists_menu {
+    my ($client, $callback) = @_;
+    Plugins::YouTubeMusic::API->getLibraryArtists(sub {
+        my $data = shift;
+        return $callback->({ items => [] }) unless $data && ref $data eq 'HASH';
+        $callback->({ items => _items_to_menu($client, $data->{items} // []) });
+    });
 }
 
 sub _liked_songs_menu {
