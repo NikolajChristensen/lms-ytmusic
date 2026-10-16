@@ -535,10 +535,12 @@ sub _top_level {
             name  => cstring($client, 'PLUGIN_YOUTUBEMUSIC_CHARTS'),
             url   => \&_charts_menu,
         },
-        {
+        # Hand-saved playlists (settings page); hidden until one is saved.
+        # Signed-in users see their account's playlists under My Library.
+        ( _saved_playlists() ? {
             name  => cstring($client, 'PLUGIN_YOUTUBEMUSIC_MY_PLAYLISTS'),
             url   => \&_my_playlists_menu,
-        },
+        } : () ),
         {
             name  => cstring($client, 'PLUGIN_YOUTUBEMUSIC_NEW_RELEASES'),
             url   => \&_new_releases_menu,
@@ -658,18 +660,21 @@ sub _charts_menu {
     });
 }
 
-sub _my_playlists_menu {
-    my ($client, $callback) = @_;
-
+# [name, browseId] pairs of the playlists saved on the settings page.
+sub _saved_playlists {
     my $saved = $prefs->get('my_playlists') || [];
     $saved = [$saved] unless ref $saved eq 'ARRAY';
+    return grep { $_->[0] && $_->[1] } map { [ split /\|/, ($_ // ''), 2 ] } @$saved;
+}
+
+sub _my_playlists_menu {
+    my ($client, $callback) = @_;
 
     my @items;
 
     # Saved playlist entries
-    for my $entry (@$saved) {
-        my ($name, $browse_id) = split /\|/, $entry, 2;
-        next unless $name && $browse_id;
+    for my $pair (_saved_playlists()) {
+        my ($name, $browse_id) = @$pair;
         push @items, {
             name        => $name,
             url         => \&_playlist_menu,
