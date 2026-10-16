@@ -341,16 +341,26 @@ my %_metadata_cache;
 # already have on hand from search/browse results, so the cache is warm
 # before LMS ever needs it - avoids a placeholder-text flash while the
 # normal async getSongInfo fetch would otherwise still be in flight.
+#
+# The first browse/search result for a track wins, but it does replace an
+# entry that only came from getSongInfo: that lookup describes the video
+# (video-still cover, channel name, no album), and it can easily run first,
+# e.g. for a queue LMS restores after a restart.
 sub primeMetadata {
     my ($class, $video_id, $info) = @_;
     return unless $video_id && $info;
 
-    $_metadata_cache{$video_id} ||= {
-        title    => $info->{title}     || '',
-        artist   => $info->{artist}    || '',
-        album    => $info->{album}     || '',
-        duration => $info->{duration}  || 0,
-        cover    => $info->{thumbnail} || '',
+    my $have = $_metadata_cache{$video_id};
+    return if $have && $have->{primed};
+    $have ||= {};
+
+    $_metadata_cache{$video_id} = {
+        title    => $info->{title}     || $have->{title}    || '',
+        artist   => $info->{artist}    || $have->{artist}   || '',
+        album    => $info->{album}     || $have->{album}    || '',
+        duration => $info->{duration}  || $have->{duration} || 0,
+        cover    => $info->{thumbnail} || $have->{cover}    || '',
+        primed   => 1,
     };
 }
 
@@ -433,6 +443,7 @@ sub _merge_song_info {
         album    => $have->{album}    || $info->{album}     || '',
         duration => $info->{duration} || $have->{duration}  || 0,
         cover    => $have->{cover}    || $info->{thumbnail} || '',
+        primed   => $have->{primed},
     };
 }
 
