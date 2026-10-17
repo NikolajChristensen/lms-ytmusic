@@ -7,7 +7,7 @@
     <plugin name="YouTubeMusic" version="1.5.0.1" minTarget="9.0" maxTarget="*">
       <title lang="EN">YouTube Music</title>
       <desc lang="EN">Browse, search, and stream YouTube Music to your Squeezebox players.</desc>
-      <changes lang="EN">Based on upstream 1.5.0 (which now includes recent searches, search fixes, private-track replacement and the ARM playback fix). Plus this fork's download priority that stays within 2 downloads.</changes>
+      <changes lang="EN">Podcasts menu back (as upstream). Based on upstream 1.5.0 (which now includes recent searches, search fixes, private-track replacement and the ARM playback fix). Plus this fork's download priority that stays within 2 downloads.</changes>
       <creator>schmij97, NikolajChristensen</creator>
       <category>musicservices</category>
       <url>https://github.com/NikolajChristensen/lms-ytmusic/releases/download/v1.5.0.1/YouTubeMusic-1.5.0.1.zip</url>
