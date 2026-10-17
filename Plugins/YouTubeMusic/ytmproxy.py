@@ -164,6 +164,40 @@ def _init_ytm_auth(headers_raw):
 
 
 
+def _parse_curl_command(raw):
+    """Extract cookie, x-goog-authuser, x-goog-pageid and authorization from a curl command string.
+
+    LMS stores the ytm_cookie as a Windows curl command with ^" quoting.
+    Returns dict with cookie/x-goog-authuser/x-goog-pageid/authorization keys, or None if
+    the input doesn't look like a curl command.
+    x-goog-pageid is present when a brand account (YouTube channel) is selected;
+    without it YouTube returns the main account's library, which is typically empty.
+    """
+    stripped = raw.strip()
+    if not stripped.lower().startswith("curl"):
+        return None
+    # Normalise Windows ^" quoting and line-continuation whitespace
+    normalized = stripped.replace("^\"", "\"").replace("^\n", " ")
+    normalized = re.sub(r'\n\s+', ' ', normalized)
+    # Percent-decode %3D -> = (Windows URL-encoded equals in cookie values)
+    normalized = normalized.replace("%3D", "=").replace("^%^3D", "=")
+    wanted = {"cookie": None, "x-goog-authuser": None, "x-goog-pageid": None,
+              "authorization": None}
+    # Extract -H "name: value" headers
+    for hdr in re.findall(r'-H\s+"([^"]+)"', normalized):
+        m = re.match(r'^([A-Za-z0-9_-]+):\s*(.+)$', hdr)
+        if m:
+            name = m.group(1).lower()
+            if name in wanted and wanted[name] is None:
+                wanted[name] = m.group(2).strip()
+    # Extract cookie from -b "..." if not already found via -H
+    if not wanted["cookie"]:
+        bm = re.search(r'-b\s+"([^"]+)"', normalized)
+        if bm:
+            wanted["cookie"] = bm.group(1).strip()
+    return wanted if wanted["cookie"] else None
+
+
 def _normalize_pasted_headers(raw):
     """Turn pasted browser request headers into the three ytmusicapi needs.
 
@@ -176,6 +210,8 @@ def _normalize_pasted_headers(raw):
     Accept-Encoding (br, zstd) / Content-Length, so YouTube's replies can't be
     decoded ("Expecting value: line 1 column 1").
 
+    Also handles Windows curl command format (stored in LMS prefs as ytm_cookie).
+
     Only cookie, x-goog-authuser, x-goog-pageid and authorization matter:
     ytmusicapi recognises browser auth by an authorization header containing
     SAPISIDHASH and regenerates its value from the cookie on every request.
@@ -185,25 +221,30 @@ def _normalize_pasted_headers(raw):
     Returns the normalised block, or the input unchanged if no cookie is found
     (so ytmusicapi reports what is missing).
     """
-    wanted = {"cookie": None, "x-goog-authuser": None, "x-goog-pageid": None,
-              "authorization": None}
-    pending = None
-    for line in (raw or "").replace("\r\n", "\n").replace("\r", "\n").split("\n"):
-        line = line.strip()
-        if not line:
-            continue
-        if pending is not None:                      # value line of a "name" line
-            if pending in wanted and wanted[pending] is None:
-                wanted[pending] = line
-            pending = None
-            continue
-        m = re.match(r"^(:?[A-Za-z0-9-]+):(?:\s+(.*))?$", line)
-        if m and m.group(2):                         # "Name: value"
-            name = m.group(1).lower()
-            if name in wanted and wanted[name] is None:
-                wanted[name] = m.group(2).strip()
-        elif m or re.match(r"^:?[A-Za-z0-9-]+$", line):  # "Name:" or "Name" alone
-            pending = (m.group(1) if m else line).lower()
+    # Handle curl command format (LMS passes ytm_cookie as Windows curl command)
+    curl_parsed = _parse_curl_command(raw or "")
+    if curl_parsed:
+        wanted = curl_parsed
+    else:
+        wanted = {"cookie": None, "x-goog-authuser": None, "x-goog-pageid": None,
+                  "authorization": None}
+        pending = None
+        for line in (raw or "").replace("\r\n", "\n").replace("\r", "\n").split("\n"):
+            line = line.strip()
+            if not line:
+                continue
+            if pending is not None:                      # value line of a "name" line
+                if pending in wanted and wanted[pending] is None:
+                    wanted[pending] = line
+                pending = None
+                continue
+            m = re.match(r"^(:?[A-Za-z0-9-]+):(?:\s+(.*))?$", line)
+            if m and m.group(2):                         # "Name: value"
+                name = m.group(1).lower()
+                if name in wanted and wanted[name] is None:
+                    wanted[name] = m.group(2).strip()
+            elif m or re.match(r"^:?[A-Za-z0-9-]+$", line):  # "Name:" or "Name" alone
+                pending = (m.group(1) if m else line).lower()
     if not wanted["cookie"]:
         return (raw or "").strip()
     auth = wanted["authorization"] or ""
@@ -211,13 +252,13 @@ def _normalize_pasted_headers(raw):
         auth = "SAPISIDHASH 0_0"                     # marker only; value is regenerated
     logging.warning("YouTube Music headers: using cookie, x-goog-authuser%s%s",
                     "" if wanted["x-goog-authuser"] else " (defaulted to 0)",
-                    ", x-goog-pageid (brand account)" if wanted["x-goog-pageid"] else "")
+                    ", x-goog-pageid (brand account)" if wanted.get("x-goog-pageid") else "")
     lines = [
         f"cookie: {wanted['cookie']}",
         f"x-goog-authuser: {wanted['x-goog-authuser'] or '0'}",
         f"authorization: {auth}",
     ]
-    if wanted["x-goog-pageid"]:
+    if wanted.get("x-goog-pageid"):
         lines.append(f"x-goog-pageid: {wanted['x-goog-pageid']}")
     return "\n".join(lines)
 
@@ -1179,42 +1220,6 @@ def _album_track_rows(data):
 
 def _norm_title(t):
     return re.sub(r"\s+", " ", (t or "").lower()).strip()
-
-# Title/artist/duration of every track the proxy has listed to LMS, so a
-# track that turns out to be unplayable can be swapped for a current copy.
-_TRACK_META = {}
-_TRACK_META_MAX = 20000
-
-def _remember_tracks(obj):
-    """Record song metadata from any JSON payload about to be sent to LMS."""
-    stack = [obj]
-    while stack:
-        o = stack.pop()
-        if isinstance(o, dict):
-            vid = o.get("videoId")
-            if vid and o.get("title") and o.get("type", "song") == "song":
-                if len(_TRACK_META) >= _TRACK_META_MAX:
-                    _TRACK_META.clear()
-                _TRACK_META[vid] = {
-                    "title":    o.get("title", ""),
-                    "artist":   o.get("artist", ""),
-                    "album":    o.get("album", ""),
-                    "duration": o.get("duration") or 0,
-                }
-            stack.extend(v for v in o.values() if isinstance(v, (dict, list)))
-        elif isinstance(o, list):
-            stack.extend(v for v in o if isinstance(v, (dict, list)))
-
-def _replacement_for_unplayable(video_id):
-    """Video ID of a playable copy of a track we listed, or None."""
-    meta = _TRACK_META.get(video_id)
-    if not meta:
-        return None
-    rep = _find_replacement_track(meta["artist"], meta["title"],
-                                  meta["duration"], meta["album"])
-    if rep and rep.get("videoId") and rep["videoId"] != video_id:
-        return rep["videoId"]
-    return None
 
 def _find_replacement_track(artist, title, duration, album=""):
     """A playable copy of an album track that YouTube greys out.
@@ -2217,7 +2222,7 @@ def _ensure_bin_in_path():
     if os.name == "nt" and BIN_DIR not in os.environ.get("PATH", ""):
         os.environ["PATH"] = BIN_DIR + os.pathsep + os.environ.get("PATH", "")
 
-def stream_audio(video_id, _replacing=None):
+def stream_audio(video_id):
     _ensure_bin_in_path()
     """
     Yield MP3 audio bytes for the given video ID by piping yt-dlp's stdout
@@ -2258,13 +2263,6 @@ def stream_audio(video_id, _replacing=None):
     _t1 = _time.monotonic()
     _log_fn = logging.warning if audio_url else (logging.info if _ydl_available is False else logging.warning)
     _log_fn("PREFETCH_YDL videoId=%s extraction=%.2fs url=%s", video_id, _t1-_t0, "OK" if audio_url else "FAIL")
-    # The fallback always starts from the watch page. A CDN URL from the
-    # persistent extractor can be refused (HTTP 403) for a plain download -
-    # that is usually why we end up here - and handing that same URL to the
-    # yt-dlp subprocess fails the same way, so the track was skipped. A fresh
-    # extraction lets yt-dlp's own downloader fetch it, at the cost of one
-    # more extraction only when the fast path has already failed.
-    ytdlp_url = url
     _NODE_PATH = _find_node()
     ytdlp_cmd = [
         ytdlp,
@@ -2282,7 +2280,7 @@ def stream_audio(video_id, _replacing=None):
         "--cache-dir", os.path.join(BIN_DIR, "ytdlp_cache"),
         "--add-header", "User-Agent:com.google.android.youtube/17.29.34",
         "-o", "-",
-        ytdlp_url,
+        url,
     ]
     # Only use direct ffmpeg URL approach on non-ARM platforms
     # On ARM (Pi), YouTube's CDN silently times out ffmpeg connections
@@ -2326,54 +2324,33 @@ def stream_audio(video_id, _replacing=None):
         logging.info("Persistent YDL not available for %s, using subprocess", video_id)
     logging.info("Streaming videoId=%s", video_id)
 
-    # Two attempts: the embedded-player client first (as before), then
-    # yt-dlp's own client choice. YouTube refuses the embedded client for some
-    # content, and extraction is occasionally flaky ("unable to extract yt
-    # initial data"), so a single attempt left such tracks silent.
-    for client_args in (["--extractor-args", "youtube:player_client=web_embedded"], []):
-        cmd = ytdlp_cmd[:-1] + client_args + ytdlp_cmd[-1:]
-        ytdlp_proc = subprocess.Popen(
-            cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL
-        )
-        ffmpeg_proc = subprocess.Popen(
-            ffmpeg_cmd,
-            stdin=ytdlp_proc.stdout,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL,
-        )
-        ytdlp_proc.stdout.close()
+    ytdlp_proc = subprocess.Popen(
+        ytdlp_cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL
+    )
+    ffmpeg_proc = subprocess.Popen(
+        ffmpeg_cmd,
+        stdin=ytdlp_proc.stdout,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+    )
+    ytdlp_proc.stdout.close()
 
-        sent = 0
-        try:
-            while True:
-                chunk = ffmpeg_proc.stdout.read(65536)
-                if not chunk:
-                    break
-                sent += len(chunk)
-                yield chunk
-        finally:
-            for proc in (ffmpeg_proc, ytdlp_proc):
+    try:
+        while True:
+            chunk = ffmpeg_proc.stdout.read(65536)
+            if not chunk:
+                break
+            yield chunk
+    finally:
+        for proc in (ffmpeg_proc, ytdlp_proc):
+            try:
+                proc.terminate()
+                proc.wait(timeout=2)
+            except Exception:
                 try:
-                    proc.terminate()
-                    proc.wait(timeout=2)
+                    proc.kill()
                 except Exception:
-                    try:
-                        proc.kill()
-                    except Exception:
-                        pass
-        if sent:
-            return
-        logging.warning("yt-dlp subprocess (%s) produced 0 bytes for %s",
-                        "web_embedded" if client_args else "default clients", video_id)
-
-    # Nothing playable under this ID (private, removed, blocked...). Lists
-    # such as Liked Songs keep the ID that was liked years ago; the apps
-    # quietly play the current copy. Do the same when we know the track.
-    if _replacing is None:
-        rep = _replacement_for_unplayable(video_id)
-        if rep:
-            logging.warning("%s is unplayable; streaming replacement %s instead", video_id, rep)
-            yield from stream_audio(rep, _replacing=video_id)
+                    pass
 
 
 class _Handler(BaseHTTPRequestHandler):
@@ -2383,7 +2360,6 @@ class _Handler(BaseHTTPRequestHandler):
         logging.debug(fmt, *args)
 
     def _send_json(self, obj, code=200):
-        _remember_tracks(obj)
         body = json.dumps(obj, ensure_ascii=False).encode()
         self.send_response(code)
         self.send_header("Content-Type", "application/json; charset=utf-8")
@@ -2943,7 +2919,7 @@ if __name__ == "__main__":
     ap.add_argument("--log-file",      default="", help="Path to log file (default: BIN_DIR/ytmproxy.log)")
     ap.add_argument("--no-node-worker", action="store_true", help="Disable persistent Node worker (saves ~140MB RAM)")
     ap.add_argument("--ytm-cookie", default="", help="YouTube Music browser cookie for authenticated access")
-    ap.add_argument("--bind",       default="127.0.0.1", help="Address to listen on (default: loopback only)")
+    ap.add_argument("--bind",       default="0.0.0.0", help="Address to listen on (default: all interfaces)")
     args = ap.parse_args()
     # Apply path overrides before run()
     if args.ytdlp and os.path.isfile(args.ytdlp):
