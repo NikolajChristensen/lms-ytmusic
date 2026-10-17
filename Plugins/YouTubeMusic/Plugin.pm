@@ -32,8 +32,9 @@ sub initPlugin {
     my $class = shift;
 
     $prefs->init({
-        proxy_port    => 9876,
-        my_playlists  => [],
+        proxy_port      => 9876,
+        my_playlists    => [],
+        recent_searches => [],
     });
 
     $class->_start_proxy();
@@ -60,6 +61,12 @@ sub initPlugin {
         menu   => 'radios',
         is_app => 1,
         weight => 10,
+    );
+
+    # Delete entries from the recent-searches list (info menu on players/apps)
+    Slim::Control::Request::addDispatch(
+        ['youtubemusic', 'recentsearches'],
+        [0, 0, 1, \&_cliRecentSearches]
     );
 
     # Register CLI handler for Jivelite/SB Radio playlist play
@@ -533,10 +540,12 @@ sub _top_level {
 
     my @items = (
         {
+            # With a search history, Search opens "New search" plus the
+            # previous searches; without one it is the search box itself.
             name   => cstring($client, 'PLUGIN_YOUTUBEMUSIC_SEARCH'),
-            url    => \&_search_dispatch,
-            type   => 'search',
-            search => '',
+            @{ $prefs->get('recent_searches') || [] }
+                ? ( url => \&_recent_searches_menu, type => 'link' )
+                : ( url => \&_search_dispatch, type => 'search', search => '' ),
         },
         {
             name  => cstring($client, 'PLUGIN_YOUTUBEMUSIC_HOME'),
@@ -580,15 +589,115 @@ sub _top_level {
     $callback->({ items => \@items });
 }
 
-sub _search_dispatch {
-    my ($client, $callback, $args) = @_;
+use constant MAX_RECENT_SEARCHES => 50;
 
-    my $query = $args->{search} // '';
+# Previous searches, newest first, with "New search" on top.
+sub _recent_searches_menu {
+    my ($client, $callback) = @_;
+
+    my $i = 0;
+    my @items = map {
+        {
+            name        => $_,
+            type        => 'link',
+            url         => \&_search_dispatch,
+            passthrough => [{ query => $_ }],
+            itemActions => {
+                info => {
+                    command     => ['youtubemusic', 'recentsearches'],
+                    fixedParams => { deleteMenu => $i++ },
+                },
+            },
+        }
+    } @{ $prefs->get('recent_searches') || [] };
+
+    unshift @items, {
+        name   => cstring($client, 'PLUGIN_YOUTUBEMUSIC_NEW_SEARCH'),
+        url    => \&_search_dispatch,
+        type   => 'search',
+        search => '',
+    };
+
+    $callback->({ items => \@items });
+}
+
+# New searches go on top. A search already in the history stays where it is:
+# LMS doesn't cache these menus (they are built by code), so it rebuilds the
+# path by position on every step, and moving entries would make a stale list
+# in an app open the neighbouring search.
+sub _add_recent_search {
+    my $query = shift;
+    return unless defined $query && $query =~ /\S/;
+    my @list = @{ $prefs->get('recent_searches') || [] };
+    return if grep { lc($_) eq lc($query) } @list;
+    unshift @list, $query;
+    splice(@list, MAX_RECENT_SEARCHES) if @list > MAX_RECENT_SEARCHES;
+    $prefs->set('recent_searches', \@list);
+}
+
+# youtubemusic recentsearches deleteMenu:<i> | delete:<i> | deleteAll:1
+sub _cliRecentSearches {
+    my $request = shift;
+    my $client  = $request->client;
+
+    if ($request->isNotCommand([['youtubemusic'], ['recentsearches']])) {
+        $request->setStatusBadDispatch();
+        return;
+    }
+
+    my $list = $prefs->get('recent_searches') || [];
+
+    if ($request->getParam('deleteAll')) {
+        $prefs->set('recent_searches', []);
+        $request->setStatusDone();
+        return;
+    }
+
+    my $idx = $request->getParam('deleteMenu') // $request->getParam('delete');
+    if (!defined $idx || $idx !~ /^\d+$/ || $idx >= @$list) {
+        $request->setStatusBadParams();
+        return;
+    }
+
+    if (defined $request->getParam('deleteMenu')) {
+        my @items = ({
+            text    => cstring($client, 'DELETE') . cstring($client, 'COLON') . ' "' . $list->[$idx] . '"',
+            actions => { go => { player => 0, cmd => ['youtubemusic', 'recentsearches'], params => { delete => $idx } } },
+            nextWindow => 'parent',
+        }, {
+            text    => cstring($client, 'PLUGIN_YOUTUBEMUSIC_CLEAR_SEARCH_HISTORY'),
+            actions => { go => { player => 0, cmd => ['youtubemusic', 'recentsearches'], params => { deleteAll => 1 } } },
+            nextWindow => 'grandParent',
+        });
+        $request->addResult('offset', 0);
+        $request->addResult('count', scalar @items);
+        $request->addResult('item_loop', \@items);
+    }
+    else {
+        my @copy = @$list;
+        splice(@copy, $idx, 1);
+        $prefs->set('recent_searches', \@copy);
+    }
+
+    $request->setStatusDone();
+}
+
+sub _search_dispatch {
+    my ($client, $callback, $args, $params) = @_;
+
+    my $typed = $args->{search} // '';
+    my $query = $typed || ($params && $params->{query}) || '';
 
     unless ($query) {
         $callback->({ items => [] });
         return;
     }
+
+    # Only newly typed searches change the history. Re-running one from the
+    # history must not move it: LMS menus navigate by position and re-fetch
+    # the list on each step, so reordering it would open another search's
+    # results (as Spotty also avoids).
+    _add_recent_search($query) if $typed;
 
     my @type_menus = map {
         my ($key, $label) = @$_;
@@ -604,7 +713,27 @@ sub _search_dispatch {
         [ playlists => 'PLUGIN_YOUTUBEMUSIC_PLAYLISTS' ],
     );
 
+    # Opened from the history: offer removing it, last so the positions of
+    # the result menus above don't change. Removes by text, not position.
+    push @type_menus, {
+        name => cstring($client, 'PLUGIN_YOUTUBEMUSIC_REMOVE_SEARCH'),
+        url  => sub {
+            my ($c, $cb) = @_;
+            _remove_recent_search($query);
+            $cb->({ items => [{
+                name => sprintf(cstring($c, 'PLUGIN_YOUTUBEMUSIC_SEARCH_REMOVED'), $query),
+                type => 'text',
+            }] });
+        },
+    } unless $typed;
+
     $callback->({ items => \@type_menus });
+}
+
+sub _remove_recent_search {
+    my $query = shift;
+    $prefs->set('recent_searches',
+        [ grep { lc($_) ne lc($query) } @{ $prefs->get('recent_searches') || [] } ]);
 }
 
 sub _search_results {

@@ -139,6 +139,11 @@
            style="width:6em;" />
   [% END %]
 
+  [% WRAPPER setting title="Search history" desc="Search remembers your last 50 searches; with a history, Search opens New search plus your previous searches. To remove one, open it from the history and choose Remove from search history at the bottom." %]
+    <input type="checkbox" name="clearSearchHistory" id="clearSearchHistory" value="1" />
+    <label for="clearSearchHistory">Clear search history when saving</label>
+  [% END %]
+
   [% WRAPPER setting title="Saved Playlists" desc="Save playlists so they always appear in the Saved Playlists menu, which is shown once at least one is saved. Works without signing in; with headers set, your account's own playlists are under My Library > My Playlists. Format: Name|BrowseID (one per line)" %]
     <div id="playlistContainer">
     [% FOREACH entry = my_playlists %]
