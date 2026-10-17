@@ -163,6 +163,40 @@ def _init_ytm_auth(headers_raw):
 
 
 
+def _parse_curl_command(raw):
+    """Extract cookie, x-goog-authuser, x-goog-pageid and authorization from a curl command string.
+
+    LMS stores the ytm_cookie as a Windows curl command with ^" quoting.
+    Returns dict with cookie/x-goog-authuser/x-goog-pageid/authorization keys, or None if
+    the input doesn't look like a curl command.
+    x-goog-pageid is present when a brand account (YouTube channel) is selected;
+    without it YouTube returns the main account's library, which is typically empty.
+    """
+    stripped = raw.strip()
+    if not stripped.lower().startswith("curl"):
+        return None
+    # Normalise Windows ^" quoting and line-continuation whitespace
+    normalized = stripped.replace("^\"", "\"").replace("^\n", " ")
+    normalized = re.sub(r'\n\s+', ' ', normalized)
+    # Percent-decode %3D -> = (Windows URL-encoded equals in cookie values)
+    normalized = normalized.replace("%3D", "=").replace("^%^3D", "=")
+    wanted = {"cookie": None, "x-goog-authuser": None, "x-goog-pageid": None,
+              "authorization": None}
+    # Extract -H "name: value" headers
+    for hdr in re.findall(r'-H\s+"([^"]+)"', normalized):
+        m = re.match(r'^([A-Za-z0-9_-]+):\s*(.+)$', hdr)
+        if m:
+            name = m.group(1).lower()
+            if name in wanted and wanted[name] is None:
+                wanted[name] = m.group(2).strip()
+    # Extract cookie from -b "..." if not already found via -H
+    if not wanted["cookie"]:
+        bm = re.search(r'-b\s+"([^"]+)"', normalized)
+        if bm:
+            wanted["cookie"] = bm.group(1).strip()
+    return wanted if wanted["cookie"] else None
+
+
 def _normalize_pasted_headers(raw):
     """Turn pasted browser request headers into the three ytmusicapi needs.
 
@@ -175,42 +209,57 @@ def _normalize_pasted_headers(raw):
     Accept-Encoding (br, zstd) / Content-Length, so YouTube's replies can't be
     decoded ("Expecting value: line 1 column 1").
 
-    Only cookie, x-goog-authuser and authorization matter: ytmusicapi
-    recognises browser auth by an authorization header containing
+    Also handles Windows curl command format (stored in LMS prefs as ytm_cookie).
+
+    Only cookie, x-goog-authuser, x-goog-pageid and authorization matter:
+    ytmusicapi recognises browser auth by an authorization header containing
     SAPISIDHASH and regenerates its value from the cookie on every request.
+    x-goog-pageid is only present when a brand account (a channel separate
+    from the main Google account) is selected; without it YouTube answers for
+    the main account, whose library is typically empty.
     Returns the normalised block, or the input unchanged if no cookie is found
     (so ytmusicapi reports what is missing).
     """
-    wanted = {"cookie": None, "x-goog-authuser": None, "authorization": None}
-    pending = None
-    for line in (raw or "").replace("\r\n", "\n").replace("\r", "\n").split("\n"):
-        line = line.strip()
-        if not line:
-            continue
-        if pending is not None:                      # value line of a "name" line
-            if pending in wanted and wanted[pending] is None:
-                wanted[pending] = line
-            pending = None
-            continue
-        m = re.match(r"^(:?[A-Za-z0-9-]+):(?:\s+(.*))?$", line)
-        if m and m.group(2):                         # "Name: value"
-            name = m.group(1).lower()
-            if name in wanted and wanted[name] is None:
-                wanted[name] = m.group(2).strip()
-        elif m or re.match(r"^:?[A-Za-z0-9-]+$", line):  # "Name:" or "Name" alone
-            pending = (m.group(1) if m else line).lower()
+    # Handle curl command format (LMS passes ytm_cookie as Windows curl command)
+    curl_parsed = _parse_curl_command(raw or "")
+    if curl_parsed:
+        wanted = curl_parsed
+    else:
+        wanted = {"cookie": None, "x-goog-authuser": None, "x-goog-pageid": None,
+                  "authorization": None}
+        pending = None
+        for line in (raw or "").replace("\r\n", "\n").replace("\r", "\n").split("\n"):
+            line = line.strip()
+            if not line:
+                continue
+            if pending is not None:                      # value line of a "name" line
+                if pending in wanted and wanted[pending] is None:
+                    wanted[pending] = line
+                pending = None
+                continue
+            m = re.match(r"^(:?[A-Za-z0-9-]+):(?:\s+(.*))?$", line)
+            if m and m.group(2):                         # "Name: value"
+                name = m.group(1).lower()
+                if name in wanted and wanted[name] is None:
+                    wanted[name] = m.group(2).strip()
+            elif m or re.match(r"^:?[A-Za-z0-9-]+$", line):  # "Name:" or "Name" alone
+                pending = (m.group(1) if m else line).lower()
     if not wanted["cookie"]:
         return (raw or "").strip()
     auth = wanted["authorization"] or ""
     if "SAPISIDHASH" not in auth:
         auth = "SAPISIDHASH 0_0"                     # marker only; value is regenerated
-    logging.warning("YouTube Music headers: using cookie, x-goog-authuser%s",
-                    "" if wanted["x-goog-authuser"] else " (defaulted to 0)")
-    return "\n".join([
+    logging.warning("YouTube Music headers: using cookie, x-goog-authuser%s%s",
+                    "" if wanted["x-goog-authuser"] else " (defaulted to 0)",
+                    ", x-goog-pageid (brand account)" if wanted.get("x-goog-pageid") else "")
+    lines = [
         f"cookie: {wanted['cookie']}",
         f"x-goog-authuser: {wanted['x-goog-authuser'] or '0'}",
         f"authorization: {auth}",
-    ])
+    ]
+    if wanted.get("x-goog-pageid"):
+        lines.append(f"x-goog-pageid: {wanted['x-goog-pageid']}")
+    return "\n".join(lines)
 
 
 _CACHE = {}
@@ -2170,8 +2219,6 @@ def stream_audio(video_id):
     _t1 = _time.monotonic()
     _log_fn = logging.warning if audio_url else (logging.info if _ydl_available is False else logging.warning)
     _log_fn("PREFETCH_YDL videoId=%s extraction=%.2fs url=%s", video_id, _t1-_t0, "OK" if audio_url else "FAIL")
-    # Use already-resolved CDN URL for subprocess fallback — avoids second YouTube extraction
-    ytdlp_url = audio_url or url
     _NODE_PATH = _find_node()
     ytdlp_cmd = [
         ytdlp,
@@ -2186,11 +2233,10 @@ def stream_audio(video_id):
         "--http-chunk-size", "1M",
         "-f", "bestaudio[ext=m4a]/bestaudio[ext=mp3]/bestaudio",
         *(["--js-runtimes", f"node:{_NODE_PATH}"] if _NODE_PATH else ["--js-runtimes", "node"]),
-        "--extractor-args", "youtube:player_client=web_embedded",
         "--cache-dir", os.path.join(BIN_DIR, "ytdlp_cache"),
         "--add-header", "User-Agent:com.google.android.youtube/17.29.34",
         "-o", "-",
-        ytdlp_url,
+        url,
     ]
     # Only use direct ffmpeg URL approach on non-ARM platforms
     # On ARM (Pi), YouTube's CDN silently times out ffmpeg connections
@@ -2829,7 +2875,7 @@ if __name__ == "__main__":
     ap.add_argument("--log-file",      default="", help="Path to log file (default: BIN_DIR/ytmproxy.log)")
     ap.add_argument("--no-node-worker", action="store_true", help="Disable persistent Node worker (saves ~140MB RAM)")
     ap.add_argument("--ytm-cookie", default="", help="YouTube Music browser cookie for authenticated access")
-    ap.add_argument("--bind",       default="127.0.0.1", help="Address to listen on (default: loopback only)")
+    ap.add_argument("--bind",       default="0.0.0.0", help="Address to listen on (default: all interfaces)")
     args = ap.parse_args()
     # Apply path overrides before run()
     if args.ytdlp and os.path.isfile(args.ytdlp):
