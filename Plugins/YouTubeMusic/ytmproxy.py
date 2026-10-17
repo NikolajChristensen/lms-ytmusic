@@ -2323,6 +2323,23 @@ def _ensure_bin_in_path():
     if os.name == "nt" and BIN_DIR not in os.environ.get("PATH", ""):
         os.environ["PATH"] = BIN_DIR + os.pathsep + os.environ.get("PATH", "")
 
+_MP3_BYTES_PER_SEC = 192000 // 8   # ffmpeg encodes MP3 at 192 kbps CBR
+
+
+def _url_duration(audio_url):
+    """Track length in seconds from a CDN URL's dur= parameter, or None."""
+    m = re.search(r"[?&]dur=([0-9.]+)", audio_url or "")
+    return float(m.group(1)) if m else None
+
+
+def _is_short(nbytes, expected, returncode):
+    """Did a download end before the end of the track? For MP3 the size
+    tells; for other formats only ffmpeg's exit status does."""
+    if _AUDIO_FORMAT == "mp3" and expected:
+        return nbytes < (expected - max(2.0, expected * 0.02)) * _MP3_BYTES_PER_SEC
+    return bool(returncode)
+
+
 def stream_audio(video_id, _replacing=None):
     _ensure_bin_in_path()
     """
@@ -2391,37 +2408,66 @@ def stream_audio(video_id, _replacing=None):
     import platform as _platform
     _is_arm = _platform.machine().startswith(("arm", "aarch"))
     _is_hls = audio_url and (".m3u8" in audio_url or "manifest.googlevideo.com" in audio_url)
+    # Seconds of audio the CDN URL says the track has (its dur= parameter), so
+    # a download that ends early can be told apart from a finished one.
+    expected = _url_duration(audio_url)
     if audio_url and not _is_hls and not _is_arm:
-        ffmpeg_url_cmd = [
-            _find_ffmpeg(), "-loglevel", "error",
-            "-user_agent", "Mozilla/5.0 (Linux; Android 6.0; Nexus 5) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Mobile Safari/537.36",
-            "-headers", "Accept: */*\r\nAccept-Language: en-us,en;q=0.5\r\n",
-            "-i", audio_url,
-            "-vn", "-map_metadata", "-1",
-            "-id3v2_version", "0", "-write_id3v1", "0",
-            "-f", _AUDIO_FORMAT, "-codec:a", _AUDIO_CODEC,
-        ]
-        if _AUDIO_CODEC not in ("flac", "pcm_s16le"):
-            ffmpeg_url_cmd += ["-b:a", "192k"]
-        if _AUDIO_CODEC == "flac":
-            ffmpeg_url_cmd += ["-sample_fmt", "s16"]
-        ffmpeg_url_cmd.append("pipe:1")
-        ffmpeg_proc = subprocess.Popen(ffmpeg_url_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        def ffmpeg_url_cmd(offset):
+            cmd = [
+                _find_ffmpeg(), "-loglevel", "error",
+                "-user_agent", "Mozilla/5.0 (Linux; Android 6.0; Nexus 5) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Mobile Safari/537.36",
+                "-headers", "Accept: */*\r\nAccept-Language: en-us,en;q=0.5\r\n",
+                # The CDN sometimes drops the connection part-way through;
+                # without these ffmpeg just ends there.
+                "-reconnect", "1", "-reconnect_streamed", "1",
+                "-reconnect_on_network_error", "1", "-reconnect_delay_max", "5",
+            ]
+            if offset:
+                cmd += ["-ss", f"{offset:.3f}"]
+            cmd += [
+                "-i", audio_url,
+                "-vn", "-map_metadata", "-1",
+                "-id3v2_version", "0", "-write_id3v1", "0",
+                "-f", _AUDIO_FORMAT, "-codec:a", _AUDIO_CODEC,
+            ]
+            if _AUDIO_CODEC not in ("flac", "pcm_s16le"):
+                cmd += ["-b:a", "192k"]
+            if _AUDIO_CODEC == "flac":
+                cmd += ["-sample_fmt", "s16"]
+            cmd.append("pipe:1")
+            return cmd
+
+        # If the download still ends short of the track's length, carry on
+        # from where it stopped. MP3 is 192 kbps CBR, so the bytes sent give
+        # the position; the pieces join into one continuous MP3 stream.
         bytes_sent = 0
-        try:
-            while True:
-                chunk = ffmpeg_proc.stdout.read(65536)
-                if not chunk:
-                    break
-                bytes_sent += len(chunk)
-                yield chunk
-        finally:
-            ffmpeg_proc.stdout.close()
-            stderr_out = ffmpeg_proc.stderr.read().decode("utf-8", errors="replace").strip()
-            ffmpeg_proc.wait()
-            if stderr_out and bytes_sent == 0:
-                logging.warning("ffmpeg URL stderr: %s", stderr_out[:500])
+        for attempt in range(3):
+            ffmpeg_proc = subprocess.Popen(ffmpeg_url_cmd(bytes_sent / _MP3_BYTES_PER_SEC if bytes_sent else 0),
+                                           stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            got = 0
+            try:
+                while True:
+                    chunk = ffmpeg_proc.stdout.read(65536)
+                    if not chunk:
+                        break
+                    got += len(chunk)
+                    bytes_sent += len(chunk)
+                    yield chunk
+            finally:
+                ffmpeg_proc.stdout.close()
+                stderr_out = ffmpeg_proc.stderr.read().decode("utf-8", errors="replace").strip()
+                ffmpeg_proc.wait()
+                if stderr_out and (got == 0 or ffmpeg_proc.returncode):
+                    logging.warning("ffmpeg URL stderr: %s", stderr_out[:500])
+            short = _is_short(bytes_sent, expected, ffmpeg_proc.returncode)
+            if not bytes_sent or not short or not got or _AUDIO_FORMAT != "mp3":
+                break
+            logging.warning("%s download ended after %.0fs of %.0fs; continuing from there",
+                            video_id, bytes_sent / _MP3_BYTES_PER_SEC, expected or 0)
         if bytes_sent > 0:
+            if short:
+                # Don't let the prefetch keep this as the finished track.
+                raise RuntimeError(f"download of {video_id} ended early ({bytes_sent} bytes)")
             return
         # Fallback: subprocess yt-dlp
         logging.warning("ffmpeg URL produced 0 bytes for %s, falling back to subprocess", video_id)
@@ -2431,36 +2477,56 @@ def stream_audio(video_id, _replacing=None):
         logging.info("Persistent YDL not available for %s, using subprocess", video_id)
     logging.info("Streaming videoId=%s", video_id)
 
-    ytdlp_proc = subprocess.Popen(
-        ytdlp_cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL
-    )
-    ffmpeg_proc = subprocess.Popen(
-        ffmpeg_cmd,
-        stdin=ytdlp_proc.stdout,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.DEVNULL,
-    )
-    ytdlp_proc.stdout.close()
-
+    # yt-dlp can also stop part-way (a chunk that keeps failing) and exit with
+    # an error while ffmpeg finishes normally. As above, carry on from where
+    # it stopped: download again and let ffmpeg skip to that point.
     sent = 0
-    try:
-        while True:
-            chunk = ffmpeg_proc.stdout.read(65536)
-            if not chunk:
-                break
-            sent += len(chunk)
-            yield chunk
-    finally:
-        for proc in (ffmpeg_proc, ytdlp_proc):
-            try:
-                proc.terminate()
-                proc.wait(timeout=2)
-            except Exception:
-                try:
-                    proc.kill()
-                except Exception:
-                    pass
+    for attempt in range(3):
+        cmd = list(ffmpeg_cmd)
+        if sent:
+            cmd[cmd.index("-i"):cmd.index("-i")] = ["-ss", f"{sent / _MP3_BYTES_PER_SEC:.3f}"]
+        ytdlp_proc = subprocess.Popen(
+            ytdlp_cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL
+        )
+        ffmpeg_proc = subprocess.Popen(
+            cmd,
+            stdin=ytdlp_proc.stdout,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+        )
+        ytdlp_proc.stdout.close()
 
+        got = 0
+        ytdlp_rc = None
+        try:
+            while True:
+                chunk = ffmpeg_proc.stdout.read(65536)
+                if not chunk:
+                    break
+                got += len(chunk)
+                sent += len(chunk)
+                yield chunk
+            try:
+                ytdlp_rc = ytdlp_proc.wait(timeout=5)
+            except Exception:
+                pass
+        finally:
+            for proc in (ffmpeg_proc, ytdlp_proc):
+                try:
+                    proc.terminate()
+                    proc.wait(timeout=2)
+                except Exception:
+                    try:
+                        proc.kill()
+                    except Exception:
+                        pass
+        short = _is_short(sent, expected, ytdlp_rc)
+        if not sent or not short or not got or _AUDIO_FORMAT != "mp3":
+            break
+        logging.warning("%s download ended after %.0fs%s; continuing from there", video_id,
+                        sent / _MP3_BYTES_PER_SEC, f" of {expected:.0f}s" if expected else "")
+    if sent and short:
+        raise RuntimeError(f"download of {video_id} ended early ({sent} bytes)")
     # Nothing playable under this ID (private, removed, blocked...). Lists
     # such as Liked Songs keep the ID that was saved years ago; the apps
     # quietly play the current copy. Do the same when we know the track.
