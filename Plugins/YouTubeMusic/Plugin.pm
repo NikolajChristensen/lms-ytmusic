@@ -538,6 +538,9 @@ sub _on_playlist_stop {
 sub _top_level {
     my ($client, $callback, $args) = @_;
 
+    my $signed_in = $prefs->get('ytm_cookie') ? 1 : 0;
+
+    # Personal entries first, then discovery - the order of the apps.
     my @items = (
         {
             # With a search history, Search opens "New search" plus the
@@ -547,14 +550,16 @@ sub _top_level {
                 ? ( url => \&_recent_searches_menu, type => 'link' )
                 : ( url => \&_search_dispatch, type => 'search', search => '' ),
         },
-        {
-            name  => cstring($client, 'PLUGIN_YOUTUBEMUSIC_HOME'),
-            url   => \&_home_menu,
-        },
-        {
-            name  => cstring($client, 'PLUGIN_YOUTUBEMUSIC_CHARTS'),
-            url   => \&_charts_menu,
-        },
+        ( $signed_in ? (
+            {
+                name => 'Speed dial',
+                url  => \&_speed_dial_menu,
+            },
+            {
+                name => 'My Library',
+                url  => \&_my_library_menu,
+            },
+        ) : () ),
         # Hand-saved playlists (settings page); hidden until one is saved.
         # Signed-in users see their account's playlists under My Library.
         ( _saved_playlists() ? {
@@ -562,29 +567,25 @@ sub _top_level {
             url   => \&_my_playlists_menu,
         } : () ),
         {
+            name  => cstring($client, 'PLUGIN_YOUTUBEMUSIC_HOME'),
+            url   => \&_home_menu,
+        },
+        {
             name  => cstring($client, 'PLUGIN_YOUTUBEMUSIC_NEW_RELEASES'),
             url   => \&_new_releases_menu,
+        },
+        {
+            name  => cstring($client, 'PLUGIN_YOUTUBEMUSIC_CHARTS'),
+            url   => \&_charts_menu,
         },
         {
             name  => cstring($client, 'PLUGIN_YOUTUBEMUSIC_MOODS'),
             url   => \&_moods_menu,
         },
-        {
-            name  => cstring($client, 'PLUGIN_YOUTUBEMUSIC_PODCASTS'),
-            url   => \&_podcasts_menu,
-        },
+        # No Podcasts entry: its page (FEmusic_podcasts) now returns HTTP 404
+        # and YouTube Music's Explore page no longer links a podcasts page,
+        # so the menu was always empty.
     );
-
-    # Add Speed dial and My Library if authenticated
-    if ($prefs->get('ytm_cookie')) {
-        push @items, {
-            name => 'Speed dial',
-            url  => \&_speed_dial_menu,
-        }, {
-            name => 'My Library',
-            url  => \&_my_library_menu,
-        };
-    }
 
     $callback->({ items => \@items });
 }
