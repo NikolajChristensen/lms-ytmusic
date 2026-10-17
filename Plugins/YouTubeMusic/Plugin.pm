@@ -321,11 +321,16 @@ sub postinitPlugin {
         $log->info("youtube:// already handled by another plugin, skipping URL handler registration");
     }
 
-    # "Go to artist" in the track menu (long press / More / info) of every
-    # YouTube Music track, wherever it is listed - and in the queue.
+    # "Go to artist" and "Go to album" in the track menu (long press / More /
+    # info) of every YouTube Music track, wherever it is listed - and in the
+    # queue.
     Slim::Menu::TrackInfo->registerInfoProvider( youtubemusic_artist => (
         after => 'playitem',
         func  => \&_trackinfo_artist,
+    ));
+    Slim::Menu::TrackInfo->registerInfoProvider( youtubemusic_album => (
+        after => 'youtubemusic_artist',
+        func  => \&_trackinfo_album,
     ));
 
     # Register global search provider (closures capture query+type)
@@ -1078,6 +1083,38 @@ sub _trackinfo_artist {
         passthrough => [{ videoId => $vid }],
         favorites   => 0,
     };
+}
+
+sub _trackinfo_album {
+    my ($client, $url, $track, $remoteMeta) = @_;
+    my ($vid) = ($url // '') =~ m{^ytm://([A-Za-z0-9_\-]+)};
+    return unless $vid;
+    return {
+        type        => 'link',
+        name        => cstring($client, 'PLUGIN_YOUTUBEMUSIC_GO_TO_ALBUM'),
+        url         => \&_song_album_menu,
+        passthrough => [{ videoId => $vid }],
+        favorites   => 0,
+    };
+}
+
+sub _song_album_menu {
+    my ($client, $callback, $args, $params) = @_;
+
+    Plugins::YouTubeMusic::API->getSongLinks($params->{videoId}, sub {
+        my $album = $_[0] && ref $_[0] eq 'HASH' && $_[0]->{album};
+        if (!$album || !$album->{browseId}) {
+            return $callback->({ items => [{
+                type => 'text',
+                name => cstring($client, 'PLUGIN_YOUTUBEMUSIC_NO_ALBUM'),
+            }] });
+        }
+        _playlist_menu($client, $callback, $args, {
+            browseId    => $album->{browseId},
+            browse_type => 'album',
+            album_title => $album->{title},
+        });
+    });
 }
 
 # The song's artist page; a choice first when it has several artists.
