@@ -582,10 +582,8 @@ sub _top_level {
             name  => cstring($client, 'PLUGIN_YOUTUBEMUSIC_MOODS'),
             url   => \&_moods_menu,
         },
-        {
-            name  => cstring($client, 'PLUGIN_YOUTUBEMUSIC_PODCASTS'),
-            url   => \&_podcasts_menu,
-        },
+        # Fork: no Podcasts entry - YouTube serves FEmusic_podcasts only in
+        # some countries (404 from Denmark), so the menu is always empty here.
     );
 
     $callback->({ items => \@items });
