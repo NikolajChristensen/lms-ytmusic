@@ -1100,8 +1100,8 @@ sub _song_actions {
     };
 }
 
-# youtubemusictrackinfo items <index> <quantity> videoId:<id>
-# youtubemusictrackinfo playlist <method> videoId:<id> item_id:<n>
+# youtubemusictrackinfo items <index> <quantity> videoId:<id> | url:ytm://<id>
+# youtubemusictrackinfo playlist <method> videoId:<id> | url:ytm://<id> item_id:<n>
 # The core track menu for a YouTube Music track. It needs a track object,
 # and LMS keeps those for remote tracks only while something holds on to
 # them (the queue does), so create one and keep the last few here.
@@ -1110,12 +1110,17 @@ my @_menu_tracks;
 sub _cliTrackInfo {
     my $request = shift;
     my $client  = $request->client;
-    my $vid     = $request->getParam('videoId') // '';
-    my $url     = "ytm://$vid";
+    # The first request has videoId (see _song_actions); the entries' own
+    # actions carry url instead, the only one of the two XMLBrowser passes on.
+    my $vid = $request->getParam('videoId');
+    ($vid) = ($request->getParam('url') // '') =~ m{^ytm://(.+)$} unless defined $vid;
+    $vid //= '';
     if ($vid !~ m{^[A-Za-z0-9_\-]+$}) {
         $request->setStatusBadParams();
         return;
     }
+    my $url = "ytm://$vid";
+    $request->addParam('url', $url);
 
     my $track = Slim::Schema->objectForUrl({ url => $url, create => 1 });
     unless (blessed($track)) {
