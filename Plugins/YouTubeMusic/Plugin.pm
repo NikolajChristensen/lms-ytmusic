@@ -697,7 +697,27 @@ sub _search_dispatch {
         [ playlists => 'PLUGIN_YOUTUBEMUSIC_PLAYLISTS' ],
     );
 
+    # Opened from the history: offer removing it, last so the positions of
+    # the result menus above don't change. Removes by text, not position.
+    push @type_menus, {
+        name => cstring($client, 'PLUGIN_YOUTUBEMUSIC_REMOVE_SEARCH'),
+        url  => sub {
+            my ($c, $cb) = @_;
+            _remove_recent_search($query);
+            $cb->({ items => [{
+                name => sprintf(cstring($c, 'PLUGIN_YOUTUBEMUSIC_SEARCH_REMOVED'), $query),
+                type => 'text',
+            }] });
+        },
+    } unless $typed;
+
     $callback->({ items => \@type_menus });
+}
+
+sub _remove_recent_search {
+    my $query = shift;
+    $prefs->set('recent_searches',
+        [ grep { lc($_) ne lc($query) } @{ $prefs->get('recent_searches') || [] } ]);
 }
 
 sub _search_results {
