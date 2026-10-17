@@ -610,10 +610,15 @@ sub _recent_searches_menu {
     $callback->({ items => \@items });
 }
 
+# New searches go on top. A search already in the history stays where it is:
+# LMS doesn't cache these menus (they are built by code), so it rebuilds the
+# path by position on every step, and moving entries would make a stale list
+# in an app open the neighbouring search.
 sub _add_recent_search {
     my $query = shift;
     return unless defined $query && $query =~ /\S/;
-    my @list = grep { lc($_) ne lc($query) } @{ $prefs->get('recent_searches') || [] };
+    my @list = @{ $prefs->get('recent_searches') || [] };
+    return if grep { lc($_) eq lc($query) } @list;
     unshift @list, $query;
     splice(@list, MAX_RECENT_SEARCHES) if @list > MAX_RECENT_SEARCHES;
     $prefs->set('recent_searches', \@list);
