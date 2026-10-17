@@ -400,85 +400,96 @@ sub _cliPlaylistCmd {
 
     $log->info("_cliPlaylistCmd: navigating path=" . join('.', @path));
 
-    # Get top-level feed
+    # Walk the menu along the whole path - Speed dial, My Library, artist
+    # discographies etc. are three or four levels deep, and stopping after two
+    # levels (as before) left nothing to play.
+    # Search text the app typed into a search box on the way down; LMS passes
+    # it to search-type levels the same way (Slim::Control::XMLBrowser).
+    my $search = $request->getParam('search');
+
     _top_level($client, sub {
-        my $feed = shift;
-        my $items = ref $feed eq 'HASH' ? $feed->{items} : $feed;
-        unless ($items && ref $items eq 'ARRAY') {
-            $log->warn("_cliPlaylistCmd: no top-level items");
-            $request->setStatusDone();
-            return;
-        }
-
-        # Navigate to the target item
-        my $level0_idx = $path[0];
-        my $item = $items->[$level0_idx];
-        unless ($item) {
-            $log->warn("_cliPlaylistCmd: no item at index $level0_idx");
-            $request->setStatusDone();
-            return;
-        }
-
-        $log->info("_cliPlaylistCmd: level0 item=" . ($item->{name} || 'unknown'));
-
-        # If path has more components, navigate deeper
-        if (scalar @path >= 2 && ref $item->{url} eq 'CODE') {
-            my $pt = $item->{passthrough} || [{}];
-            $item->{url}->($client, sub {
-                my $subfeed = shift;
-                my $subitems = ref $subfeed eq 'HASH' ? $subfeed->{items} : $subfeed;
-                unless ($subitems && ref $subitems eq 'ARRAY') {
-                    $request->setStatusDone();
-                    return;
-                }
-                my $level1_idx = $path[1];
-                my $subitem = $subitems->[$level1_idx];
-                unless ($subitem) {
-                    $log->warn("_cliPlaylistCmd: no item at index $level1_idx");
-                    $request->setStatusDone();
-                    return;
-                }
-                $log->info("_cliPlaylistCmd: level1 item=" . ($subitem->{name} || 'unknown'));
-
-                # Play the playlist URL
-                my $play_url = $subitem->{play} || $subitem->{url};
-                if ($play_url && !ref($play_url)) {
-                    $log->info("_cliPlaylistCmd: playing $play_url");
-                    if ($play_url =~ /^ytmplaylist:\/\//) {
-                        # Explode playlist then start from the right track index
-                        my $start_index = defined $path[2] ? $path[2] : 0;
-                        Plugins::YouTubeMusic::PlaylistProtocolHandler->explodePlaylist(
-                            $client, $play_url, sub {
-                                my $urls = shift;
-                                if ($urls && @$urls) {
-                                    if ($method eq 'play') {
-                                        $client->execute(['playlist', 'loadtracks', 'listref', $urls, undef, $start_index]);
-                                        $client->execute(['play']);
-                                    } else {
-                                        $client->execute(['playlist', 'addtracks', 'listref', $urls]);
-                                    }
-                                }
-                                $request->setStatusDone();
-                            }
-                        );
-                        return;
-                    } else {
-                        $client->execute(['playlist', $method, $play_url]);
-                    }
-                }
+        _walk_menu($client, shift, [@path], $search, sub {
+            my ($item, $siblings) = @_;
+            unless ($item) {
                 $request->setStatusDone();
-            }, {}, @{$pt});
-        } else {
-            my $play_url = $item->{play} || $item->{url};
-            if ($play_url && !ref($play_url)) {
-                $log->info("_cliPlaylistCmd: playing $play_url");
-                $client->execute(['playlist', $method, $play_url]);
+                return;
             }
-            $request->setStatusDone();
-        }
+            _play_menu_item($client, $method, $item, $siblings, sub { $request->setStatusDone() });
+        });
     }, {});
 
     $request->setStatusProcessing();
+}
+
+# Follow @$path (item indexes) through the feed, opening each menu level via
+# its url callback. Calls $done->($item, $siblings) with the target item and
+# the list it is in, or $done->() if the path doesn't resolve.
+sub _walk_menu {
+    my ($client, $feed, $path, $search, $done) = @_;
+    my $items = ref $feed eq 'HASH' ? $feed->{items} : $feed;
+    unless ($items && ref $items eq 'ARRAY') {
+        $log->warn("_cliPlaylistCmd: menu level has no items");
+        return $done->();
+    }
+    my $idx  = shift @$path;
+    my $item = defined $idx ? $items->[$idx] : undef;
+    unless ($item) {
+        $log->warn("_cliPlaylistCmd: no item at index " . ($idx // '?'));
+        return $done->();
+    }
+    $log->info("_cliPlaylistCmd: item=" . ($item->{name} || 'unknown'));
+
+    # Target reached, or nothing deeper to open
+    return $done->($item, $items) unless @$path && ref $item->{url} eq 'CODE';
+
+    my %args = (defined $search && ($item->{type} // '') eq 'search') ? (search => $search) : ();
+    $item->{url}->($client, sub { _walk_menu($client, shift, $path, $search, $done) },
+                   \%args, @{ $item->{passthrough} || [{}] });
+}
+
+# Play/add a menu item the way LMS does for a tap: a track inside a list
+# plays the list's tracks starting at that one; an album/playlist is
+# expanded; anything else is handed to the playlist command as is.
+sub _play_menu_item {
+    my ($client, $method, $item, $siblings, $done) = @_;
+    my $play = $item->{play} // $item->{url};
+    $play = undef if ref $play;
+
+    if ($play && $play =~ m{^ytmplaylist://}) {
+        $log->info("_cliPlaylistCmd: expanding $play");
+        Plugins::YouTubeMusic::PlaylistProtocolHandler->explodePlaylist($client, $play, sub {
+            my $urls = shift;
+            if ($urls && @$urls) {
+                if ($method eq 'play') {
+                    $client->execute(['playlist', 'loadtracks', 'listref', $urls]);
+                    $client->execute(['play']);
+                } else {
+                    $client->execute(['playlist', 'addtracks', 'listref', $urls]);
+                }
+            }
+            $done->();
+        });
+        return;
+    }
+
+    if ($play && $play =~ m{^ytm://} && $method eq 'play') {
+        my @tracks = grep { !ref($_->{play}) && ($_->{play} // '') =~ m{^ytm://} } @{ $siblings || [] };
+        my ($start) = grep { $tracks[$_] == $item } 0 .. $#tracks;
+        if (@tracks > 1 && defined $start) {
+            $log->info("_cliPlaylistCmd: playing " . scalar(@tracks) . " tracks from #$start");
+            $client->execute(['playlist', 'loadtracks', 'listref', [ map { $_->{play} } @tracks ], undef, $start]);
+            $client->execute(['play']);
+            return $done->();
+        }
+    }
+
+    if ($play) {
+        $log->info("_cliPlaylistCmd: $method $play");
+        $client->execute(['playlist', $method, $play]);
+    } else {
+        $log->warn("_cliPlaylistCmd: item has nothing to play");
+    }
+    $done->();
 }
 
 sub _on_playlist_stop {
