@@ -2383,9 +2383,15 @@ def stream_audio(video_id, _replacing=None):
         "-o", "-",
         url,
     ]
-    # Only use direct ffmpeg URL approach on non-ARM platforms
-    # On ARM (Pi), YouTube's CDN silently times out ffmpeg connections
-    if audio_url:
+    # Only use direct ffmpeg URL approach on non-ARM platforms.
+    # On ARM (Pi), YouTube's CDN silently times out ffmpeg connections,
+    # causing ffmpeg to hang indefinitely with no timeout and produce 0 bytes.
+    # HLS manifests also hang ffmpeg regardless of platform.
+    # yt-dlp subprocess handles both cases correctly.
+    import platform as _platform
+    _is_arm = _platform.machine().startswith(("arm", "aarch"))
+    _is_hls = audio_url and (".m3u8" in audio_url or "manifest.googlevideo.com" in audio_url)
+    if audio_url and not _is_hls and not _is_arm:
         ffmpeg_url_cmd = [
             _find_ffmpeg(), "-loglevel", "error",
             "-user_agent", "Mozilla/5.0 (Linux; Android 6.0; Nexus 5) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Mobile Safari/537.36",
@@ -2844,7 +2850,7 @@ class _Handler(BaseHTTPRequestHandler):
                 # not to the stream itself (a long song should stream indefinitely)
                 first_byte_deadline = time.time() + 60
                 while time.time() < first_byte_deadline:
-                    if os.path.exists(done_path):
+                    if os.path.exists(done_path) and os.path.getsize(done_path) > 0:
                         break
                     if os.path.exists(tmp_path) and os.path.getsize(tmp_path) > 0:
                         break
