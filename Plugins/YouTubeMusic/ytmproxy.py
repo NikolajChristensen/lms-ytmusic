@@ -1534,6 +1534,10 @@ PREFETCH_DIR = os.path.join(tempfile.gettempdir(), "ytmproxy_prefetch")
 _prefetch_started = set()
 _prefetch_lock = threading.Lock()
 _prefetch_semaphore = threading.Semaphore(2)  # Max 2 concurrent prefetch downloads
+# Video IDs LMS is waiting to stream right now. Their download must not queue
+# behind background prefetches (browsing triggers many, and each can take
+# 20-40 s), or /stream gives up after 60 s and LMS skips the track.
+_prefetch_urgent = set()
 
 def _prefetch_paths(video_id):
     os.makedirs(PREFETCH_DIR, exist_ok=True)
@@ -1572,9 +1576,16 @@ def _cleanup_old_prefetch(max_age=600):
 
 def _prefetch_worker(video_id):
     tmp_path, done_path = _prefetch_paths(video_id)
-    with _prefetch_semaphore:
+    # Wait for one of the background slots - unless the track becomes urgent
+    # (LMS is streaming it), then start straight away.
+    held = False
+    while not held:
+        held = _prefetch_semaphore.acquire(timeout=0.5)
+        if not held and video_id in _prefetch_urgent:
+            break
+    try:
         t0 = time.time()
-        logging.warning("PREFETCH_TIMING %s started", video_id)
+        logging.warning("PREFETCH_TIMING %s started%s", video_id, "" if held else " (urgent)")
         try:
             logged_first = False
             logged_128k = False
@@ -1599,12 +1610,19 @@ def _prefetch_worker(video_id):
         finally:
             with _prefetch_lock:
                 _prefetch_started.discard(video_id)
-def start_prefetch(video_id):
+                _prefetch_urgent.discard(video_id)
+    finally:
+        if held:
+            _prefetch_semaphore.release()
+
+def start_prefetch(video_id, urgent=False):
     _, done_path = _prefetch_paths(video_id)
     if os.path.exists(done_path):
         return "already_cached"
 
     with _prefetch_lock:
+        if urgent:
+            _prefetch_urgent.add(video_id)   # also lifts one already waiting
         if video_id in _prefetch_started:
             return "in_progress"
         _prefetch_started.add(video_id)
@@ -2762,7 +2780,7 @@ class _Handler(BaseHTTPRequestHandler):
                 tmp_path, done_path = _prefetch_paths(vid)
                 cached = get_prefetched_path(vid)
                 if not cached:
-                    start_prefetch(vid)
+                    start_prefetch(vid, urgent=True)
                 # Send HTTP headers immediately — don't make LMS wait for yt-dlp to start
                 # For a seek into a track that is still downloading, start at
                 # the requested offset; the loop below waits for the download
