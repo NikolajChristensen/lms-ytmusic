@@ -522,7 +522,10 @@ _SEARCH_PARAMS = {
     "songs":     "EgWKAQIIAWoKEAkQBRAKEAMQBA%3D%3D",
     "albums":    "EgWKAQIYAWoKEAkQChADEAQQBQ%3D%3D",
     "artists":   "EgWKAQIgAWoKEAkQChADEAQQBQ%3D%3D",
-    "playlists": "EgeKAQQoAEABahAQDhAKEAMQBBAJEAUQCw%3D%3D",
+    # Community playlists (ytmusicapi's current filter); the previous value
+    # returned no playlist shelf at all, so results were leftovers from other
+    # sections (top card, albums, songs).
+    "playlists": "EgeKAQQoAEABagwQDhAKEAMQBBAJEAU%3D",
     "videos":    "EgWKAQIQAWoKEAkQChADEAQQBQ%3D%3D",
 }
 
@@ -569,7 +572,9 @@ def search(query, type_filter="songs"):
                     .get("thumbnail", {})
                     .get("thumbnails", [])
             )
-            title = _text(card.get("title", {})) or _text(card.get("subtitle", {}))
+            # _text(obj, key) reads obj[key]; passing card["title"] itself
+            # returned "" (an unnamed top result, shown as "Unknown Artist").
+            title = _text(card) or _text(card, "subtitle")
             if browse_ep.get("browseId"):
                 pt = (
                     browse_ep.get("browseEndpointContextSupportedConfigs", {})
@@ -579,6 +584,7 @@ def search(query, type_filter="songs"):
                 results.append({
                     "type":      "album" if "ALBUM" in pt else "artist" if "ARTIST" in pt else "playlist",
                     "title":     title,
+                    "name":      title,
                     "browseId":  browse_ep["browseId"],
                     "thumbnail": thumb,
                 })
