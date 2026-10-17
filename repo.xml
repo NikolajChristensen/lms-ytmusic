@@ -4,14 +4,14 @@
     <title lang="EN">YouTube Music for LMS (NikolajChristensen fork)</title>
   </details>
   <plugins>
-    <plugin name="YouTubeMusic" version="1.5.0.6" minTarget="9.0" maxTarget="*">
+    <plugin name="YouTubeMusic" version="1.5.0.7" minTarget="9.0" maxTarget="*">
       <title lang="EN">YouTube Music</title>
       <desc lang="EN">Browse, search, and stream YouTube Music to your Squeezebox players.</desc>
       <changes lang="EN">New: "Go to artist" and "Go to album" in every track's menu. Tracks no longer stop early when a download is cut off (it now continues where it stopped). Podcasts menu hidden. Based on upstream 1.5.0, plus download priority within 2 downloads.</changes>
       <creator>schmij97, NikolajChristensen</creator>
       <category>musicservices</category>
-      <url>https://github.com/NikolajChristensen/lms-ytmusic/releases/download/v1.5.0.6/YouTubeMusic-1.5.0.6.zip</url>
-      <sha>c8c16b513d990d5e37a285c7e46192efc178cdea</sha>
+      <url>https://github.com/NikolajChristensen/lms-ytmusic/releases/download/v1.5.0.7/YouTubeMusic-1.5.0.7.zip</url>
+      <sha>fa6d2a84f1a6b75acbaf258262b5a4913b356e7c</sha>
     </plugin>
   </plugins>
 </extensions>
