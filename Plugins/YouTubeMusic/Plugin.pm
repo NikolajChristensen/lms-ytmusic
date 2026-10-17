@@ -1162,10 +1162,18 @@ sub _trackinfo_album {
     };
 }
 
+# Title and artist as LMS knows them, to find the current copy of a song
+# whose saved video ID is dead.
+sub _song_meta {
+    my ($client, $vid) = @_;
+    my $meta = Plugins::YouTubeMusic::ProtocolHandler->getMetadataFor($client, "ytm://$vid") || {};
+    return { title => $meta->{title}, artist => $meta->{artist} };
+}
+
 sub _song_album_menu {
     my ($client, $callback, $args, $params) = @_;
 
-    Plugins::YouTubeMusic::API->getSongLinks($params->{videoId}, sub {
+    Plugins::YouTubeMusic::API->getSongLinks($params->{videoId}, _song_meta($client, $params->{videoId}), sub {
         my $album = $_[0] && ref $_[0] eq 'HASH' && $_[0]->{album};
         if (!$album || !$album->{browseId}) {
             return $callback->({ items => [{
@@ -1185,7 +1193,7 @@ sub _song_album_menu {
 sub _song_artist_menu {
     my ($client, $callback, $args, $params) = @_;
 
-    Plugins::YouTubeMusic::API->getSongLinks($params->{videoId}, sub {
+    Plugins::YouTubeMusic::API->getSongLinks($params->{videoId}, _song_meta($client, $params->{videoId}), sub {
         my $artists = ($_[0] && ref $_[0] eq 'HASH' && $_[0]->{artists}) || [];
         if (!@$artists) {
             return $callback->({ items => [{
