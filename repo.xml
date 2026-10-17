@@ -4,14 +4,14 @@
     <title lang="EN">YouTube Music for LMS</title>
   </details>
   <plugins>
-    <plugin name="YouTubeMusic" version="1.4.8" minTarget="9.0" maxTarget="*">
+    <plugin name="YouTubeMusic" version="1.4.9" minTarget="9.0" maxTarget="*">
       <title lang="EN">YouTube Music</title>
       <desc lang="EN">Browse, search, and stream YouTube Music to your Squeezebox players.</desc>
-      <changes lang="EN">Speed Dial, My Library Albums/Artists, Chrome header support, pip-free install, artwork fix, greyed-out track fix, security hardening. Thanks to NikolajChristensen (PRs #16-20).</changes>
+      <changes lang="EN">Fix playback broken by yt-dlp 2026.08.19 (SABR/iOS client); fix My Library empty for brand accounts (x-goog-pageid); fix proxy bind so hardware Squeezebox players can connect.</changes>
       <creator>schmij97</creator>
       <category>musicservices</category>
-      <url>https://github.com/schmij97/lms-ytmusic/releases/download/v1.4.8/YouTubeMusic-1.4.8.zip</url>
-      <sha>959217470ae4b370b1c568906ca4d783da1f173a</sha>
+      <url>https://github.com/schmij97/lms-ytmusic/releases/download/v1.4.9/YouTubeMusic-1.4.9.zip</url>
+      <sha>b4c0a8cc240e1cd01c0b2bba57154fd971a7238a</sha>
     </plugin>
   </plugins>
 </extensions>
