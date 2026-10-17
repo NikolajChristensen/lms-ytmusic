@@ -16,9 +16,9 @@ The test player is muted, its queue is saved first and put back at the end
 (left stopped), and its power state is restored. A synced player is refused.
 
 Usage:
-  ytm-menu-test.py --player masterbedroom            # full run (~10-15 min)
+  ytm-menu-test.py --player masterbedroom            # full run (~15-20 min)
   ytm-menu-test.py --player masterbedroom --browse-only
-Options: --search TEXT (default: iotunn), --max-plays N (default: 18),
+Options: --search TEXT (default: iotunn), --max-plays N (default: 18), --only TEXT,
          --lms URL (default: http://127.0.0.1:9000)
 
 Note: the typed-search test adds TEXT to the plugin's recent searches (moved
@@ -124,6 +124,7 @@ def crawl(lms, pid, search, log):
                     reps.append(r)
                 if len(reps) >= 4:
                     break
+        reps = [r for r in reps if r.get("type") != "search"] + [r for r in reps if r.get("type") == "search"]
         for r in reps:
             name = (r.get("name") or "?")[:40]
             rpath = path + [name]
@@ -143,7 +144,7 @@ def crawl(lms, pid, search, log):
 
 
 # ── playing ─────────────────────────────────────────────────────────────────
-def play_test(lms, pid, cand, route, wait=35):
+def play_test(lms, pid, cand, route, wait=60):
     lms.rpc(pid, ["stop"])
     lms.rpc(pid, ["playlist", "clear"])
     cmd = ["youtubemusic", "playlist", "play", f"item_id:{cand['id']}"]
@@ -168,8 +169,10 @@ def play_test(lms, pid, cand, route, wait=35):
             lms.rpc(pid, ["stop"])
             return res
         time.sleep(1)
+    st = lms.rpc(pid, ["status", "-", 1, "tags:u"])
     lms.rpc(pid, ["stop"])
     why = "nothing queued" if not tracks else f"{tracks} queued but no audio within {wait}s"
+    why += f" (player mode={st.get('mode')}, time={st.get('time', 0)}, waiting={st.get('waitingToPlay', '-')})"
     return {"ok": False, "why": why, "tracks": tracks}
 
 
@@ -179,6 +182,7 @@ def main():
     ap.add_argument("--search", default="iotunn")
     ap.add_argument("--max-plays", type=int, default=18)
     ap.add_argument("--browse-only", action="store_true")
+    ap.add_argument("--only", default="", help="only play-test items whose menu path contains this text")
     ap.add_argument("--lms", default="http://127.0.0.1:9000")
     a = ap.parse_args()
 
@@ -198,6 +202,8 @@ def main():
     empty = [b for b in browsed if b["items"] == 0]
     log(f"  {len(browsed)} menus opened, {len(empty)} empty, {len(cands)} kinds of playable item found")
 
+    if a.only:
+        cands = [c for c in cands if a.only.lower() in c["path"].lower()]
     if not a.browse_only:
         state = save_state(lms, pid)
         log(f"\n== Playing ({min(len(cands), a.max_plays)} items x web + touch); "
