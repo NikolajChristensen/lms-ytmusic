@@ -1536,8 +1536,18 @@ _prefetch_lock = threading.Lock()
 _prefetch_semaphore = threading.Semaphore(2)  # Max 2 concurrent prefetch downloads
 # Video IDs LMS is waiting to stream right now. Their download must not queue
 # behind background prefetches (browsing triggers many, and each can take
-# 20-40 s), or /stream gives up after 60 s and LMS skips the track.
-_prefetch_urgent = set()
+# 20-40 s), or /stream gives up after 60 s and LMS skips the track. They take
+# the next free slot before any background prefetch, and if both slots are
+# busy with background prefetches one of those is cancelled - the 2-slot
+# limit itself is never exceeded (each download is yt-dlp + ffmpeg, and small
+# servers such as a 512 MB container run out of memory otherwise).
+_prefetch_urgent  = set()
+_prefetch_waiting = set()   # workers waiting for a slot
+_prefetch_running = set()   # workers holding a slot
+_prefetch_cancel  = set()   # background downloads asked to stop
+
+class _PrefetchCancelled(Exception):
+    pass
 
 def _prefetch_paths(video_id):
     os.makedirs(PREFETCH_DIR, exist_ok=True)
@@ -1574,23 +1584,46 @@ def _cleanup_old_prefetch(max_age=600):
     except Exception:
         logging.exception("Prefetch cleanup error")
 
+def _acquire_prefetch_slot(video_id):
+    """Block until this worker may download (see _prefetch_urgent)."""
+    while True:
+        with _prefetch_lock:
+            urgent = video_id in _prefetch_urgent
+            urgent_waiting = any(v in _prefetch_urgent for v in _prefetch_waiting if v != video_id)
+        if urgent or not urgent_waiting:
+            if _prefetch_semaphore.acquire(timeout=0.5):
+                return
+            if urgent:
+                with _prefetch_lock:
+                    victim = next((v for v in _prefetch_running
+                                   if v not in _prefetch_urgent and v not in _prefetch_cancel), None)
+                    if victim:
+                        _prefetch_cancel.add(victim)
+                        logging.warning("PREFETCH %s cancelled to make room for %s", victim, video_id)
+        else:
+            time.sleep(0.5)
+
 def _prefetch_worker(video_id):
     tmp_path, done_path = _prefetch_paths(video_id)
-    # Wait for one of the background slots - unless the track becomes urgent
-    # (LMS is streaming it), then start straight away.
-    held = False
-    while not held:
-        held = _prefetch_semaphore.acquire(timeout=0.5)
-        if not held and video_id in _prefetch_urgent:
-            break
+    with _prefetch_lock:
+        _prefetch_waiting.add(video_id)
+    _acquire_prefetch_slot(video_id)
+    with _prefetch_lock:
+        _prefetch_waiting.discard(video_id)
+        _prefetch_running.add(video_id)
+    gen = None
     try:
         t0 = time.time()
-        logging.warning("PREFETCH_TIMING %s started%s", video_id, "" if held else " (urgent)")
+        logging.warning("PREFETCH_TIMING %s started%s", video_id,
+                        " (urgent)" if video_id in _prefetch_urgent else "")
         try:
             logged_first = False
             logged_128k = False
+            gen = stream_audio(video_id)
             with open(tmp_path, "wb") as f:
-                for chunk in stream_audio(video_id):
+                for chunk in gen:
+                    if video_id in _prefetch_cancel:
+                        raise _PrefetchCancelled()
                     if not logged_first:
                         logging.warning("PREFETCH_TIMING %s first byte after %.2fs", video_id, time.time()-t0)
                         logged_first = True
@@ -1601,6 +1634,11 @@ def _prefetch_worker(video_id):
                         logged_128k = True
             os.replace(tmp_path, done_path)
             logging.warning("PREFETCH_TIMING %s complete after %.2fs", video_id, time.time()-t0)
+        except _PrefetchCancelled:
+            try:
+                os.remove(tmp_path)
+            except OSError:
+                pass
         except Exception:
             logging.exception("Prefetch failed for %s", video_id)
             try:
@@ -1608,12 +1646,15 @@ def _prefetch_worker(video_id):
             except OSError:
                 pass
         finally:
+            if gen is not None:
+                gen.close()   # stops yt-dlp/ffmpeg if we left the loop early
             with _prefetch_lock:
                 _prefetch_started.discard(video_id)
                 _prefetch_urgent.discard(video_id)
+                _prefetch_cancel.discard(video_id)
+                _prefetch_running.discard(video_id)
     finally:
-        if held:
-            _prefetch_semaphore.release()
+        _prefetch_semaphore.release()
 
 def start_prefetch(video_id, urgent=False):
     _, done_path = _prefetch_paths(video_id)
