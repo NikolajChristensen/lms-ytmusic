@@ -1492,6 +1492,7 @@ PREFETCH_DIR = os.path.join(tempfile.gettempdir(), "ytmproxy_prefetch")
 _prefetch_started = set()
 _prefetch_lock = threading.Lock()
 _prefetch_semaphore = threading.Semaphore(2)  # Max 2 concurrent prefetch downloads
+_urgent_running = set()  # videos being urgently streamed (bypass semaphore)
 
 def _prefetch_paths(video_id):
     os.makedirs(PREFETCH_DIR, exist_ok=True)
@@ -1528,9 +1529,48 @@ def _cleanup_old_prefetch(max_age=600):
     except Exception:
         logging.exception("Prefetch cleanup error")
 
+def _urgent_stream_worker(video_id):
+    """Download video_id WITHOUT the semaphore — used when LMS needs it NOW.
+    Writes to the same tmp/done paths as the normal prefetch so the stream
+    handler's wait loop picks it up transparently.
+    Registers in _urgent_running so _prefetch_worker skips this video."""
+    tmp_path, done_path = _prefetch_paths(video_id)
+    if os.path.exists(done_path) and os.path.getsize(done_path) > 0:
+        return  # already done by normal prefetch that beat us here
+    with _prefetch_lock:
+        _urgent_running.add(video_id)
+    t0 = time.time()
+    logging.warning("URGENT_STREAM %s starting (bypassing semaphore)", video_id)
+    try:
+        with open(tmp_path, "wb") as f:
+            for chunk in stream_audio(video_id):
+                f.write(chunk)
+                f.flush()
+        os.replace(tmp_path, done_path)
+        logging.warning("URGENT_STREAM %s complete after %.2fs", video_id, time.time() - t0)
+    except Exception:
+        logging.exception("Urgent stream failed for %s", video_id)
+        try:
+            os.remove(tmp_path)
+        except OSError:
+            pass
+    finally:
+        with _prefetch_lock:
+            _urgent_running.discard(video_id)
+            _prefetch_started.discard(video_id)
+
+
 def _prefetch_worker(video_id):
     tmp_path, done_path = _prefetch_paths(video_id)
     with _prefetch_semaphore:
+        # If urgent stream already handled this (bypassed semaphore while we waited),
+        # don't overwrite tmp_path — that would corrupt an in-progress stream.
+        with _prefetch_lock:
+            if video_id in _urgent_running:
+                logging.warning("PREFETCH skip %s — urgent stream already running", video_id)
+                return
+        if os.path.exists(done_path) and os.path.getsize(done_path) > 0:
+            return  # urgent stream completed while we waited for semaphore
         t0 = time.time()
         logging.warning("PREFETCH_TIMING %s started", video_id)
         try:
@@ -2282,9 +2322,15 @@ def stream_audio(video_id):
         "-o", "-",
         url,
     ]
-    # Only use direct ffmpeg URL approach on non-ARM platforms
-    # On ARM (Pi), YouTube's CDN silently times out ffmpeg connections
-    if audio_url:
+    # Only use direct ffmpeg URL approach on non-ARM platforms.
+    # On ARM (Pi), YouTube's CDN silently times out ffmpeg connections,
+    # causing ffmpeg to hang indefinitely with no timeout and produce 0 bytes.
+    # HLS manifests also hang ffmpeg regardless of platform.
+    # yt-dlp subprocess handles both cases correctly.
+    import platform as _platform
+    _is_arm = _platform.machine().startswith(("arm", "aarch"))
+    _is_hls = audio_url and (".m3u8" in audio_url or "manifest.googlevideo.com" in audio_url)
+    if audio_url and not _is_hls and not _is_arm:
         ffmpeg_url_cmd = [
             _find_ffmpeg(), "-loglevel", "error",
             "-user_agent", "Mozilla/5.0 (Linux; Android 6.0; Nexus 5) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Mobile Safari/537.36",
@@ -2730,11 +2776,21 @@ class _Handler(BaseHTTPRequestHandler):
                 # Wait for first bytes — timeout only applies to this initial wait
                 # not to the stream itself (a long song should stream indefinitely)
                 first_byte_deadline = time.time() + 60
+                urgent_triggered = False
                 while time.time() < first_byte_deadline:
-                    if os.path.exists(done_path):
+                    if os.path.exists(done_path) and os.path.getsize(done_path) > 0:
                         break
                     if os.path.exists(tmp_path) and os.path.getsize(tmp_path) > 0:
                         break
+                    # If no bytes after 5s the prefetch is likely semaphore-blocked;
+                    # start an urgent download that bypasses the semaphore so LMS
+                    # doesn't have to wait for an unrelated background prefetch to finish.
+                    if not urgent_triggered and time.time() > first_byte_deadline - 55:
+                        logging.warning("URGENT_STREAM %s triggering after 5s wait", vid)
+                        urgent_triggered = True
+                        threading.Thread(
+                            target=_urgent_stream_worker, args=(vid,), daemon=True
+                        ).start()
                     time.sleep(0.1)
                 sz = os.path.getsize(tmp_path) if os.path.exists(tmp_path) else 0
                 logging.warning("Starting stream %s with %d bytes buffered", vid, sz)
