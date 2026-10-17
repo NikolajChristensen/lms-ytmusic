@@ -857,12 +857,19 @@ def browse_charts():
         target   = shelf or carousel
         if not target:
             continue
+        # _text(obj) reads obj["title"]; passing the title dict itself
+        # returned "" and every section ended up named "Charts".
         if carousel:
             header = carousel.get("header", {}).get("musicCarouselShelfBasicHeaderRenderer", {})
-            title  = _text(header.get("title", {}))
+            title  = _text(header)
         else:
-            title = _text(shelf.get("title", {}))
+            title = _text(shelf)
+        # "Video charts" is a carousel of musicTwoRowItemRenderer playlist
+        # cards, which _shelf_items (list rows only) dropped - leaving just
+        # the Top artists list.
         items = _shelf_items(target)
+        if not items and carousel:
+            items = _parse_two_row_items(carousel)
         if items:
             result.append({"title": title or "Charts", "items": items})
     _cache_set("charts", result)
