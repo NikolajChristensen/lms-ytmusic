@@ -4,14 +4,14 @@
     <title lang="EN">YouTube Music for LMS</title>
   </details>
   <plugins>
-    <plugin name="YouTubeMusic" version="1.4.9" minTarget="9.0" maxTarget="*">
+    <plugin name="YouTubeMusic" version="1.4.10" minTarget="9.0" maxTarget="*">
       <title lang="EN">YouTube Music</title>
       <desc lang="EN">Browse, search, and stream YouTube Music to your Squeezebox players.</desc>
-      <changes lang="EN">Fix playback broken by yt-dlp 2026.08.19 (SABR/iOS client); fix My Library empty for brand accounts (x-goog-pageid); fix proxy bind so hardware Squeezebox players can connect.</changes>
+      <changes lang="EN">Private playlists now open when signed in; personal menus stable (no wrong tile on tap); Saved Playlists hidden when empty; Charts shows Video charts with real section names.</changes>
       <creator>schmij97</creator>
       <category>musicservices</category>
-      <url>https://github.com/schmij97/lms-ytmusic/releases/download/v1.4.9/YouTubeMusic-1.4.9.zip</url>
-      <sha>b4c0a8cc240e1cd01c0b2bba57154fd971a7238a</sha>
+      <url>https://github.com/schmij97/lms-ytmusic/releases/download/v1.4.10/YouTubeMusic-1.4.10.zip</url>
+      <sha>4ffc24d730dc822ff19338fba04fd6e3507f11be</sha>
     </plugin>
   </plugins>
 </extensions>
