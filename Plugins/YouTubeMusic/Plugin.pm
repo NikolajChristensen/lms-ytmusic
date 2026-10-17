@@ -582,9 +582,10 @@ sub _top_level {
             name  => cstring($client, 'PLUGIN_YOUTUBEMUSIC_MOODS'),
             url   => \&_moods_menu,
         },
-        # No Podcasts entry: its page (FEmusic_podcasts) now returns HTTP 404
-        # and YouTube Music's Explore page no longer links a podcasts page,
-        # so the menu was always empty.
+        {
+            name  => cstring($client, 'PLUGIN_YOUTUBEMUSIC_PODCASTS'),
+            url   => \&_podcasts_menu,
+        },
     );
 
     $callback->({ items => \@items });
