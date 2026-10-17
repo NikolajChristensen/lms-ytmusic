@@ -4,14 +4,14 @@
     <title lang="EN">YouTube Music for LMS (NikolajChristensen fork)</title>
   </details>
   <plugins>
-    <plugin name="YouTubeMusic" version="1.4.10.5" minTarget="9.0" maxTarget="*">
+    <plugin name="YouTubeMusic" version="1.4.10.6" minTarget="9.0" maxTarget="*">
       <title lang="EN">YouTube Music</title>
       <desc lang="EN">Browse, search, and stream YouTube Music to your Squeezebox players.</desc>
-      <changes lang="EN">Recent searches: a search opened from the history has "Remove from search history" at the bottom, in every interface.</changes>
+      <changes lang="EN">Menu order like the apps: Search, Speed dial, My Library first, then Featured, New Releases, Charts and Moods. The Podcasts entry is gone (YouTube no longer offers that page, so it was always empty).</changes>
       <creator>schmij97, NikolajChristensen</creator>
       <category>musicservices</category>
-      <url>https://github.com/NikolajChristensen/lms-ytmusic/releases/download/v1.4.10.5/YouTubeMusic-1.4.10.5.zip</url>
-      <sha>a61c42f044295a16cb1bf3ae9629b9ad7765a391</sha>
+      <url>https://github.com/NikolajChristensen/lms-ytmusic/releases/download/v1.4.10.6/YouTubeMusic-1.4.10.6.zip</url>
+      <sha>181e5da65d0da8b2baa57697ad647913d6c53f00</sha>
     </plugin>
   </plugins>
 </extensions>
