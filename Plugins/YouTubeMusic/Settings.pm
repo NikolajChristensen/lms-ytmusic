@@ -39,6 +39,8 @@ sub handler {
         $cookie =~ s/^\s+|\s+$//g;  # trim whitespace
         $prefs->set('ytm_cookie', $cookie);
 
+        $prefs->set('recent_searches', []) if $params->{clearSearchHistory};
+
         # Notify proxy to reload auth without restart
         my $port = $prefs->get('proxy_port') || 9876;
         my $ua = Slim::Networking::SimpleAsyncHTTP->new(sub {}, sub {});
