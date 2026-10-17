@@ -4,14 +4,14 @@
     <title lang="EN">YouTube Music for LMS (NikolajChristensen fork)</title>
   </details>
   <plugins>
-    <plugin name="YouTubeMusic" version="1.4.10.7" minTarget="9.0" maxTarget="*">
+    <plugin name="YouTubeMusic" version="1.4.10.8" minTarget="9.0" maxTarget="*">
       <title lang="EN">YouTube Music</title>
       <desc lang="EN">Browse, search, and stream YouTube Music to your Squeezebox players.</desc>
-      <changes lang="EN">Fix nothing playing from players/apps when a track was reached through a typed search (e.g. Search > artist > Albums > album > track).</changes>
+      <changes lang="EN">Search: Playlists now finds real playlists (it showed unrelated albums and songs), and the top result no longer shows as "Unknown Artist".</changes>
       <creator>schmij97, NikolajChristensen</creator>
       <category>musicservices</category>
-      <url>https://github.com/NikolajChristensen/lms-ytmusic/releases/download/v1.4.10.7/YouTubeMusic-1.4.10.7.zip</url>
-      <sha>857b601f3f2e4a09e3e419d283a13a7e6206851a</sha>
+      <url>https://github.com/NikolajChristensen/lms-ytmusic/releases/download/v1.4.10.8/YouTubeMusic-1.4.10.8.zip</url>
+      <sha>51d3e4148f6e98aff5e1afb2bed8e064ad969552</sha>
     </plugin>
   </plugins>
 </extensions>
