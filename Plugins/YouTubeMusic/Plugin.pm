@@ -1091,16 +1091,19 @@ sub _history_menu {
 # artist" and "Go to album". The other actions stay as they are.
 sub _song_actions {
     my $url = shift;
+    my ($vid) = $url =~ m{^ytm://(.+)$};
     return {
         info => {
             command     => ['youtubemusictrackinfo', 'items'],
-            fixedParams => { url => $url },
+            # The ID, not the ytm:// URL: the web UI puts this unescaped into
+            # a link path, where "://" breaks it.
+            fixedParams => { videoId => $vid },
         },
     };
 }
 
-# youtubemusictrackinfo items <index> <quantity> url:ytm://<id>
-# youtubemusictrackinfo playlist <method> url:ytm://<id> item_id:<n>
+# youtubemusictrackinfo items <index> <quantity> videoId:<id>
+# youtubemusictrackinfo playlist <method> videoId:<id> item_id:<n>
 # The core track menu for a YouTube Music track. It needs a track object,
 # and LMS keeps those for remote tracks only while something holds on to
 # them (the queue does), so create one and keep the last few here.
@@ -1109,8 +1112,9 @@ my @_menu_tracks;
 sub _cliTrackInfo {
     my $request = shift;
     my $client  = $request->client;
-    my $url     = $request->getParam('url') // '';
-    if ($url !~ m{^ytm://[A-Za-z0-9_\-]+$}) {
+    my $vid     = $request->getParam('videoId') // '';
+    my $url     = "ytm://$vid";
+    if ($vid !~ m{^[A-Za-z0-9_\-]+$}) {
         $request->setStatusBadParams();
         return;
     }
