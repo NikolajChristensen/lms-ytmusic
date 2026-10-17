@@ -4,14 +4,14 @@
     <title lang="EN">YouTube Music for LMS (NikolajChristensen fork)</title>
   </details>
   <plugins>
-    <plugin name="YouTubeMusic" version="1.4.10.10" minTarget="9.0" maxTarget="*">
+    <plugin name="YouTubeMusic" version="1.4.11.1" minTarget="9.0" maxTarget="*">
       <title lang="EN">YouTube Music</title>
       <desc lang="EN">Browse, search, and stream YouTube Music to your Squeezebox players.</desc>
-      <changes lang="EN">Important fix for 1.4.10.9: never more than 2 YouTube downloads at once again (starting many songs quickly could exhaust a small server's memory). The song you play still goes first.</changes>
+      <changes lang="EN">Based on upstream 1.4.11 (which now includes the touch-play fix). Plus this fork's recent searches, menu order, search fixes and download priority.</changes>
       <creator>schmij97, NikolajChristensen</creator>
       <category>musicservices</category>
-      <url>https://github.com/NikolajChristensen/lms-ytmusic/releases/download/v1.4.10.10/YouTubeMusic-1.4.10.10.zip</url>
-      <sha>e49855d4b1f86e4f32ea7ccff81f67483efb6653</sha>
+      <url>https://github.com/NikolajChristensen/lms-ytmusic/releases/download/v1.4.11.1/YouTubeMusic-1.4.11.1.zip</url>
+      <sha>49f913b787a448b9b143b86a531c2da43351e2d7</sha>
     </plugin>
   </plugins>
 </extensions>
