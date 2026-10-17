@@ -64,17 +64,18 @@ sub initPlugin {
         weight => 10,
     );
 
-    # Delete entries from the recent-searches list (info menu on players/apps)
-    # Track menu for songs in the plugin's own lists (see _song_actions)
+    # Track menu for songs in the plugin's own lists (see _song_actions). One
+    # word: XMLBrowser only accepts single-verb queries.
     Slim::Control::Request::addDispatch(
-        ['youtubemusic', 'trackinfo', 'items', '_index', '_quantity'],
+        ['youtubemusictrackinfo', 'items', '_index', '_quantity'],
         [1, 1, 1, \&_cliTrackInfo]
     );
     Slim::Control::Request::addDispatch(
-        ['youtubemusic', 'trackinfo', 'playlist', '_method'],
+        ['youtubemusictrackinfo', 'playlist', '_method'],
         [1, 1, 1, \&_cliTrackInfo]
     );
 
+    # Delete entries from the recent-searches list (info menu on players/apps)
     Slim::Control::Request::addDispatch(
         ['youtubemusic', 'recentsearches'],
         [0, 0, 1, \&_cliRecentSearches]
@@ -1092,14 +1093,14 @@ sub _song_actions {
     my $url = shift;
     return {
         info => {
-            command     => ['youtubemusic', 'trackinfo', 'items'],
+            command     => ['youtubemusictrackinfo', 'items'],
             fixedParams => { url => $url },
         },
     };
 }
 
-# youtubemusic trackinfo items <index> <quantity> url:ytm://<id>
-# youtubemusic trackinfo playlist <method> url:ytm://<id> item_id:<n>
+# youtubemusictrackinfo items <index> <quantity> url:ytm://<id>
+# youtubemusictrackinfo playlist <method> url:ytm://<id> item_id:<n>
 # The core track menu for a YouTube Music track. It needs a track object,
 # and LMS keeps those for remote tracks only while something holds on to
 # them (the queue does), so create one and keep the last few here.
@@ -1130,7 +1131,7 @@ sub _cliTrackInfo {
         $request->setStatusBadParams();
         return;
     }
-    Slim::Control::XMLBrowser::cliQuery('youtubemusic trackinfo', $feed, $request);
+    Slim::Control::XMLBrowser::cliQuery('youtubemusictrackinfo', $feed, $request);
 }
 
 sub _trackinfo_artist {
