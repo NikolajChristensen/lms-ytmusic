@@ -1227,6 +1227,42 @@ def _album_track_rows(data):
 def _norm_title(t):
     return re.sub(r"\s+", " ", (t or "").lower()).strip()
 
+# Title/artist/duration of every track the proxy has listed to LMS, so a
+# track that turns out to be unplayable can be swapped for a current copy.
+_TRACK_META = {}
+_TRACK_META_MAX = 20000
+
+def _remember_tracks(obj):
+    """Record song metadata from any JSON payload about to be sent to LMS."""
+    stack = [obj]
+    while stack:
+        o = stack.pop()
+        if isinstance(o, dict):
+            vid = o.get("videoId")
+            if vid and o.get("title") and o.get("type", "song") == "song":
+                if len(_TRACK_META) >= _TRACK_META_MAX:
+                    _TRACK_META.clear()
+                _TRACK_META[vid] = {
+                    "title":    o.get("title", ""),
+                    "artist":   o.get("artist", ""),
+                    "album":    o.get("album", ""),
+                    "duration": o.get("duration") or 0,
+                }
+            stack.extend(v for v in o.values() if isinstance(v, (dict, list)))
+        elif isinstance(o, list):
+            stack.extend(v for v in o if isinstance(v, (dict, list)))
+
+def _replacement_for_unplayable(video_id):
+    """Video ID of a playable copy of a track we listed, or None."""
+    meta = _TRACK_META.get(video_id)
+    if not meta:
+        return None
+    rep = _find_replacement_track(meta["artist"], meta["title"],
+                                  meta["duration"], meta["album"])
+    if rep and rep.get("videoId") and rep["videoId"] != video_id:
+        return rep["videoId"]
+    return None
+
 def _find_replacement_track(artist, title, duration, album=""):
     """A playable copy of an album track that YouTube greys out.
 
@@ -2268,7 +2304,7 @@ def _ensure_bin_in_path():
     if os.name == "nt" and BIN_DIR not in os.environ.get("PATH", ""):
         os.environ["PATH"] = BIN_DIR + os.pathsep + os.environ.get("PATH", "")
 
-def stream_audio(video_id):
+def stream_audio(video_id, _replacing=None):
     _ensure_bin_in_path()
     """
     Yield MP3 audio bytes for the given video ID by piping yt-dlp's stdout
@@ -2387,11 +2423,13 @@ def stream_audio(video_id):
     )
     ytdlp_proc.stdout.close()
 
+    sent = 0
     try:
         while True:
             chunk = ffmpeg_proc.stdout.read(65536)
             if not chunk:
                 break
+            sent += len(chunk)
             yield chunk
     finally:
         for proc in (ffmpeg_proc, ytdlp_proc):
@@ -2404,6 +2442,15 @@ def stream_audio(video_id):
                 except Exception:
                     pass
 
+    # Nothing playable under this ID (private, removed, blocked...). Lists
+    # such as Liked Songs keep the ID that was saved years ago; the apps
+    # quietly play the current copy. Do the same when we know the track.
+    if not sent and _replacing is None:
+        rep = _replacement_for_unplayable(video_id)
+        if rep:
+            logging.warning("%s is unplayable; streaming replacement %s instead", video_id, rep)
+            yield from stream_audio(rep, _replacing=video_id)
+
 
 class _Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
@@ -2412,6 +2459,7 @@ class _Handler(BaseHTTPRequestHandler):
         logging.debug(fmt, *args)
 
     def _send_json(self, obj, code=200):
+        _remember_tracks(obj)
         body = json.dumps(obj, ensure_ascii=False).encode()
         self.send_response(code)
         self.send_header("Content-Type", "application/json; charset=utf-8")
