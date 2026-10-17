@@ -1491,9 +1491,13 @@ def get_song_info(video_id):
     }
 
 
-def get_song_links(video_id):
+def get_song_links(video_id, title="", artist="", _replacing=False):
     """The artist(s) and album a song links to, as the YouTube Music player
-    shows them under the title - for "Go to artist" in the track menu."""
+    shows them under the title - for "Go to artist" in the track menu.
+
+    A dead video ID (lists such as Liked Songs keep IDs saved years ago)
+    links to nothing; then use the current copy of the song, as playback
+    does. title/artist are what LMS shows, for when we haven't listed it."""
     key = f"song_links:{video_id}"
     cached = _cache_get(key)
     if cached is not None:
@@ -1518,6 +1522,13 @@ def get_song_links(video_id):
             result["artists"].append({"name": run.get("text", ""), "browseId": bid})
         elif bid.startswith("MPRE") and not result["album"]:
             result["album"] = {"title": run.get("text", ""), "browseId": bid}
+    if not result["artists"] and not _replacing:
+        meta = _TRACK_META.get(video_id) or {"title": title, "artist": artist, "duration": 0, "album": ""}
+        rep = meta.get("title") and _find_replacement_track(meta["artist"], meta["title"],
+                                                            meta["duration"], meta["album"])
+        if rep and rep.get("videoId") and rep["videoId"] != video_id:
+            logging.info("song links for %s: using current copy %s", video_id, rep["videoId"])
+            result = get_song_links(rep["videoId"], _replacing=True)
     _cache_set(key, result)
     return result
 
@@ -2752,7 +2763,7 @@ class _Handler(BaseHTTPRequestHandler):
                 vid = p("videoId")
                 if not vid:
                     return self._error("Missing videoId", 400)
-                self._send_json(get_song_links(vid))
+                self._send_json(get_song_links(vid, p("title"), p("artist")))
             elif path == "/song":
                 vid = p("videoId")
                 if not vid:

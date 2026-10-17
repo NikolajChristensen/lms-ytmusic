@@ -92,8 +92,9 @@ sub getSongInfo {
 }
 
 sub getSongLinks {
-    my ($class, $video_id, $cb) = @_;
-    _get("/song/links?videoId=$video_id", $cb);
+    my ($class, $video_id, $meta, $cb) = @_;
+    my $q = join('', map { "&$_=" . uri_escape_utf8($meta->{$_} // '') } qw(title artist));
+    _get("/song/links?videoId=$video_id$q", $cb);
 }
 
 sub prefetch {
