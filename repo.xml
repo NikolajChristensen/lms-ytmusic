@@ -4,14 +4,14 @@
     <title lang="EN">YouTube Music for LMS</title>
   </details>
   <plugins>
-    <plugin name="YouTubeMusic" version="1.4.10" minTarget="9.0" maxTarget="*">
+    <plugin name="YouTubeMusic" version="1.4.11" minTarget="9.0" maxTarget="*">
       <title lang="EN">YouTube Music</title>
       <desc lang="EN">Browse, search, and stream YouTube Music to your Squeezebox players.</desc>
-      <changes lang="EN">Private playlists now open when signed in; personal menus stable (no wrong tile on tap); Saved Playlists hidden when empty; Charts shows Video charts with real section names.</changes>
+      <changes lang="EN">Fix touch-to-play and play-all on hardware players and phone apps for deep menus (My Library, Albums, Speed Dial, Search results).</changes>
       <creator>schmij97</creator>
       <category>musicservices</category>
-      <url>https://github.com/schmij97/lms-ytmusic/releases/download/v1.4.10/YouTubeMusic-1.4.10.zip</url>
-      <sha>4ffc24d730dc822ff19338fba04fd6e3507f11be</sha>
+      <url>https://github.com/schmij97/lms-ytmusic/releases/download/v1.4.11/YouTubeMusic-1.4.11.zip</url>
+      <sha>e4ce36e2e424b7d710b9dc8c4b20acd43af2518e</sha>
     </plugin>
   </plugins>
 </extensions>
