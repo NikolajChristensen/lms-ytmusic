@@ -139,7 +139,7 @@
            style="width:6em;" />
   [% END %]
 
-  [% WRAPPER setting title="My Playlists" desc="Save playlists so they always appear in My Playlists menu. Format: Name|BrowseID (one per line)" %]
+  [% WRAPPER setting title="Saved Playlists" desc="Save playlists so they always appear in the Saved Playlists menu, which is shown once at least one is saved. Works without signing in; with headers set, your account's own playlists are under My Library > My Playlists. Format: Name|BrowseID (one per line)" %]
     <div id="playlistContainer">
     [% FOREACH entry = my_playlists %]
     [% parts = entry.split('\|') %]

@@ -56,7 +56,7 @@ PLUGIN_YOUTUBEMUSIC_ERROR_PROXY_FAILED
 	EN	Could not connect to YouTube Music proxy. Check LMS logs.
 
 PLUGIN_YOUTUBEMUSIC_MY_PLAYLISTS
-	EN	My Playlists
+	EN	Saved Playlists
 
 PLUGIN_YOUTUBEMUSIC_NEW_RELEASES
 	EN	New Releases
