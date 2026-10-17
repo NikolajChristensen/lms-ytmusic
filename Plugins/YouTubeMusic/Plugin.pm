@@ -65,6 +65,12 @@ sub initPlugin {
     );
 
     # Delete entries from the recent-searches list (info menu on players/apps)
+    # Track menu for songs in the plugin's own lists (see _song_actions)
+    Slim::Control::Request::addDispatch(
+        ['youtubemusic', 'trackinfo', 'items', '_index', '_quantity'],
+        [1, 1, 1, \&_cliTrackInfo]
+    );
+
     Slim::Control::Request::addDispatch(
         ['youtubemusic', 'recentsearches'],
         [0, 0, 1, \&_cliRecentSearches]
@@ -1072,6 +1078,34 @@ sub _history_menu {
     });
 }
 
+# In the plugin's own lists LMS gives a song only a basic context menu (play,
+# add, favourite, title, URL) that track info providers don't reach. Point
+# "more" at the full track menu instead - the one the queue shows, with "Go to
+# artist" and "Go to album". The other actions stay as they are.
+sub _song_actions {
+    my $url = shift;
+    return {
+        info => {
+            command     => ['youtubemusic', 'trackinfo', 'items'],
+            fixedParams => { url => $url },
+        },
+    };
+}
+
+# youtubemusic trackinfo items <index> <quantity> url:ytm://<id>
+# The core track menu needs a track object, which LMS only has for tracks it
+# has queued; create one for this URL first, then hand over to the core.
+sub _cliTrackInfo {
+    my $request = shift;
+    my $url = $request->getParam('url') // '';
+    if ($url !~ m{^ytm://[A-Za-z0-9_\-]+$}) {
+        $request->setStatusBadParams();
+        return;
+    }
+    Slim::Schema->objectForUrl({ url => $url, create => 1 });
+    Slim::Menu::TrackInfo::cliQuery($request);
+}
+
 sub _trackinfo_artist {
     my ($client, $url, $track, $remoteMeta) = @_;
     my ($vid) = ($url // '') =~ m{^ytm://([A-Za-z0-9_\-]+)};
@@ -1227,6 +1261,7 @@ sub _items_to_menu {
                 play      => $ytm_url,
                 type      => 'audio',
                 on_select => 'play',
+                itemActions => _song_actions($ytm_url),
                 $playall ? ( playall => 1 ) : (),
             };
         }
@@ -1286,6 +1321,7 @@ sub _items_to_menu {
                 play      => $ytm_url,
                 type      => 'audio',
                 on_select => 'play',
+                itemActions => _song_actions($ytm_url),
                 $playall ? ( playall => 1 ) : (),
             };
         }
