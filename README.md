@@ -20,13 +20,22 @@ accordance with YouTube's Terms of Service.
 > working if Google changes that API without notice. See
 > [If the API changes](#if-the-api-changes) below for how to fix it.
 
+## What's New in 1.5.0
+
+- **Recent search history** — Search remembers your last 50 searches; open Search to see them, or remove individual entries from within
+- **Unplayable track replacement** — if a saved track has gone private or been removed, the proxy automatically finds and streams a matching copy so playback continues silently
+- **Podcast / ARM streaming fix** — HLS-format audio (used by many podcasts and some songs) now streams correctly on Raspberry Pi / ARM hardware; previously it silently produced no audio
+- **Playlist search fixed** — Search → Playlists now returns real playlists instead of mixed results
+- **Menu reordered** — top-level menu now follows the YouTube Music app order: Search first, then Saved Playlists, then discovery sections
+
 ## Features
 
 - Browse Home, Charts & Trending, New Releases, Moods & Genres, Podcasts
-- Search (Songs, Albums, Artists, Playlists)
+- Search (Songs, Albums, Artists, Playlists) with recent search history
 - Saved Playlists — save favourite playlists so they always appear in the menu (no sign-in needed)
 - Play individual songs or explode a full playlist/album into your queue
 - Background prefetching of the next track so transitions are near-instant
+- Automatic replacement of private/removed tracks with a matching playable copy
 - Works on real Squeezebox hardware (tested on Squeezebox Radio) and
   software players (squeezeslave)
 - Correct title, artist, and artwork metadata
