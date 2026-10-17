@@ -16,9 +16,9 @@ The test player is muted, its queue is saved first and put back at the end
 (left stopped), and its power state is restored. A synced player is refused.
 
 Usage:
-  ytm-menu-test.py --player masterbedroom            # full run (~15-20 min)
+  ytm-menu-test.py --player masterbedroom            # full run (~10-15 min)
   ytm-menu-test.py --player masterbedroom --browse-only
-Options: --search TEXT (default: iotunn), --max-plays N (default: 18), --only TEXT,
+Options: --search TEXT (default: iotunn), --max-plays N (default: 8), --pause S (default: 15), --only TEXT,
          --lms URL (default: http://127.0.0.1:9000)
 
 Note: the typed-search test adds TEXT to the plugin's recent searches (moved
@@ -27,6 +27,7 @@ to the top if it is already there).
 import argparse
 import json
 import re
+import signal
 import sys
 import time
 import urllib.request
@@ -180,7 +181,8 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--player", required=True)
     ap.add_argument("--search", default="iotunn")
-    ap.add_argument("--max-plays", type=int, default=18)
+    ap.add_argument("--max-plays", type=int, default=8)
+    ap.add_argument("--pause", type=int, default=15, help="seconds between play tests")
     ap.add_argument("--browse-only", action="store_true")
     ap.add_argument("--only", default="", help="only play-test items whose menu path contains this text")
     ap.add_argument("--lms", default="http://127.0.0.1:9000")
@@ -214,6 +216,7 @@ def main():
         try:
             for c in cands[:a.max_plays]:
                 for route in ("web", "touch"):
+                    time.sleep(a.pause)   # spread the downloads out (load, rate limits)
                     r = play_test(lms, pid, c, route)
                     if r["ok"]:
                         msg = f"OK   {r['tracks']:3} queued, #{r['index']}, audio after {r['start']}s"
@@ -222,6 +225,9 @@ def main():
                         msg = f"FAIL {r['why']}"
                     log(f"  {route:5} {c['type']:8} {c['path'][:70]:70} {msg}")
         finally:
+            # Restoring must not be cut short by another Ctrl+C
+            signal.signal(signal.SIGINT, signal.SIG_IGN)
+            print("  restoring the test player - please wait...", flush=True)
             restore_state(lms, pid, state)
             log(f"  '{pname}' restored: {len(state['urls'])} tracks, volume {state['volume']}, "
                 f"power {'on' if state['power'] else 'off'} (left stopped)")
@@ -239,4 +245,7 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except KeyboardInterrupt:
+        sys.exit("\nStopped (Ctrl+C); the test player was restored.")
