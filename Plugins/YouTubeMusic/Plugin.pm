@@ -70,6 +70,10 @@ sub initPlugin {
         ['youtubemusic', 'trackinfo', 'items', '_index', '_quantity'],
         [1, 1, 1, \&_cliTrackInfo]
     );
+    Slim::Control::Request::addDispatch(
+        ['youtubemusic', 'trackinfo', 'playlist', '_method'],
+        [1, 1, 1, \&_cliTrackInfo]
+    );
 
     Slim::Control::Request::addDispatch(
         ['youtubemusic', 'recentsearches'],
@@ -1093,17 +1097,38 @@ sub _song_actions {
 }
 
 # youtubemusic trackinfo items <index> <quantity> url:ytm://<id>
-# The core track menu needs a track object, which LMS only has for tracks it
-# has queued; create one for this URL first, then hand over to the core.
+# youtubemusic trackinfo playlist <method> url:ytm://<id> item_id:<n>
+# The core track menu for a YouTube Music track. It needs a track object,
+# and LMS keeps those for remote tracks only while something holds on to
+# them (the queue does), so create one and keep the last few here.
+my @_menu_tracks;
+
 sub _cliTrackInfo {
     my $request = shift;
-    my $url = $request->getParam('url') // '';
+    my $client  = $request->client;
+    my $url     = $request->getParam('url') // '';
     if ($url !~ m{^ytm://[A-Za-z0-9_\-]+$}) {
         $request->setStatusBadParams();
         return;
     }
-    Slim::Schema->objectForUrl({ url => $url, create => 1 });
-    Slim::Menu::TrackInfo::cliQuery($request);
+
+    my $track = Slim::Schema->objectForUrl({ url => $url, create => 1 });
+    unless (blessed($track)) {
+        $request->setStatusBadParams();
+        return;
+    }
+    @_menu_tracks = ($track, grep { $_ != $track } @_menu_tracks);
+    splice(@_menu_tracks, 20) if @_menu_tracks > 20;
+
+    my $feed = Slim::Menu::TrackInfo->menu($client, $url, $track, {
+        menuMode    => $request->getParam('menu') || 0,
+        menuContext => 'normal',
+    });
+    unless ($feed) {
+        $request->setStatusBadParams();
+        return;
+    }
+    Slim::Control::XMLBrowser::cliQuery('youtubemusic trackinfo', $feed, $request);
 }
 
 sub _trackinfo_artist {
