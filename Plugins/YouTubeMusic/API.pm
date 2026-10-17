@@ -91,6 +91,11 @@ sub getSongInfo {
     _get("/song?videoId=$video_id", $cb);
 }
 
+sub getSongLinks {
+    my ($class, $video_id, $cb) = @_;
+    _get("/song/links?videoId=$video_id", $cb);
+}
+
 sub prefetch {
     my ($class, $video_id, $cb) = @_;
     $cb ||= sub {};

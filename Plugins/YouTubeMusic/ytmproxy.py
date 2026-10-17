@@ -1491,6 +1491,37 @@ def get_song_info(video_id):
     }
 
 
+def get_song_links(video_id):
+    """The artist(s) and album a song links to, as the YouTube Music player
+    shows them under the title - for "Go to artist" in the track menu."""
+    key = f"song_links:{video_id}"
+    cached = _cache_get(key)
+    if cached is not None:
+        return cached
+    data = _post("next", {"videoId": video_id, "isAudioOnly": True})
+
+    def renderers(o):
+        if isinstance(o, dict):
+            if "playlistPanelVideoRenderer" in o:
+                yield o["playlistPanelVideoRenderer"]
+            for v in o.values():
+                yield from renderers(v)
+        elif isinstance(o, list):
+            for v in o:
+                yield from renderers(v)
+
+    r = next((r for r in renderers(data) if r.get("videoId") == video_id), {})
+    result = {"artists": [], "album": None}
+    for run in r.get("longBylineText", {}).get("runs", []):
+        bid = run.get("navigationEndpoint", {}).get("browseEndpoint", {}).get("browseId", "")
+        if bid.startswith("UC"):
+            result["artists"].append({"name": run.get("text", ""), "browseId": bid})
+        elif bid.startswith("MPRE") and not result["album"]:
+            result["album"] = {"title": run.get("text", ""), "browseId": bid}
+    _cache_set(key, result)
+    return result
+
+
 # ---- Audio streaming via yt-dlp | ffmpeg ----
 
 # ---- Prefetch cache (disk-backed) ----
@@ -2717,6 +2748,11 @@ class _Handler(BaseHTTPRequestHandler):
                 if not bid:
                     return self._error("Missing browseId", 400)
                 self._send_json(browse_artist_discography(bid, p("params")))
+            elif path == "/song/links":
+                vid = p("videoId")
+                if not vid:
+                    return self._error("Missing videoId", 400)
+                self._send_json(get_song_links(vid))
             elif path == "/song":
                 vid = p("videoId")
                 if not vid:
