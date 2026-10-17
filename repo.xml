@@ -4,14 +4,14 @@
     <title lang="EN">YouTube Music for LMS (NikolajChristensen fork)</title>
   </details>
   <plugins>
-    <plugin name="YouTubeMusic" version="1.4.10.4" minTarget="9.0" maxTarget="*">
+    <plugin name="YouTubeMusic" version="1.4.10.5" minTarget="9.0" maxTarget="*">
       <title lang="EN">YouTube Music</title>
       <desc lang="EN">Browse, search, and stream YouTube Music to your Squeezebox players.</desc>
-      <changes lang="EN">Recent searches: tapping a previous search no longer opens the results of another search.</changes>
+      <changes lang="EN">Recent searches: a search opened from the history has "Remove from search history" at the bottom, in every interface.</changes>
       <creator>schmij97, NikolajChristensen</creator>
       <category>musicservices</category>
-      <url>https://github.com/NikolajChristensen/lms-ytmusic/releases/download/v1.4.10.4/YouTubeMusic-1.4.10.4.zip</url>
-      <sha>2a97feea93676d3f093112c7a655ba8dc6289b2c</sha>
+      <url>https://github.com/NikolajChristensen/lms-ytmusic/releases/download/v1.4.10.5/YouTubeMusic-1.4.10.5.zip</url>
+      <sha>a61c42f044295a16cb1bf3ae9629b9ad7765a391</sha>
     </plugin>
   </plugins>
 </extensions>
