@@ -403,8 +403,12 @@ sub _cliPlaylistCmd {
     # Walk the menu along the whole path - Speed dial, My Library, artist
     # discographies etc. are three or four levels deep, and stopping after two
     # levels (as before) left nothing to play.
+    # Search text the app typed into a search box on the way down; LMS passes
+    # it to search-type levels the same way (Slim::Control::XMLBrowser).
+    my $search = $request->getParam('search');
+
     _top_level($client, sub {
-        _walk_menu($client, shift, [@path], sub {
+        _walk_menu($client, shift, [@path], $search, sub {
             my ($item, $siblings) = @_;
             unless ($item) {
                 $request->setStatusDone();
@@ -421,7 +425,7 @@ sub _cliPlaylistCmd {
 # its url callback. Calls $done->($item, $siblings) with the target item and
 # the list it is in, or $done->() if the path doesn't resolve.
 sub _walk_menu {
-    my ($client, $feed, $path, $done) = @_;
+    my ($client, $feed, $path, $search, $done) = @_;
     my $items = ref $feed eq 'HASH' ? $feed->{items} : $feed;
     unless ($items && ref $items eq 'ARRAY') {
         $log->warn("_cliPlaylistCmd: menu level has no items");
@@ -438,8 +442,9 @@ sub _walk_menu {
     # Target reached, or nothing deeper to open
     return $done->($item, $items) unless @$path && ref $item->{url} eq 'CODE';
 
-    $item->{url}->($client, sub { _walk_menu($client, shift, $path, $done) },
-                   {}, @{ $item->{passthrough} || [{}] });
+    my %args = (defined $search && ($item->{type} // '') eq 'search') ? (search => $search) : ();
+    $item->{url}->($client, sub { _walk_menu($client, shift, $path, $search, $done) },
+                   \%args, @{ $item->{passthrough} || [{}] });
 }
 
 # Play/add a menu item the way LMS does for a tap: a track inside a list
