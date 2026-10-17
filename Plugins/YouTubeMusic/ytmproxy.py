@@ -1265,6 +1265,19 @@ def _with_replaced_album_tracks(data, items):
     out.extend(it for it in items if it.get("videoId") not in seen)
     return out
 
+def _signed_in_playlist_items(playlist_id):
+    """Tracks of a playlist fetched with the user's login, or [] if not
+    signed in or it fails."""
+    yt = _get_ytm_auth()
+    if not yt:
+        return []
+    try:
+        tracks = yt.get_playlist(playlist_id, limit=None).get("tracks") or []
+    except Exception as e:
+        logging.warning("signed-in get_playlist failed for %s: %s", playlist_id, e)
+        return []
+    return [i for i in _ytm_items(tracks) if i.get("type") == "song"]
+
 def browse_playlist(browse_id):
     cache_key = f"playlist:{browse_id}"
     cached = _cache_get(cache_key)
@@ -1311,6 +1324,11 @@ def browse_playlist(browse_id):
     if browse_id.startswith("MPREb_"):
         items = _with_replaced_album_tracks(data, items)
         _fill_album_track_metadata(data, items)
+
+    # Private playlists (most of a user's own) come back empty to the
+    # anonymous request above. When signed in, fetch them through ytmusicapi.
+    if not items and browse_id.startswith("VL"):
+        items = _signed_in_playlist_items(browse_id[2:])
 
     result = {"browseId": browse_id, "items": items}
     _cache_set(cache_key, result)
