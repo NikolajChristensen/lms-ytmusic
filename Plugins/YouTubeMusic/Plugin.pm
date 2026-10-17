@@ -11,6 +11,7 @@ use Scalar::Util   qw(blessed);
 
 use Slim::Utils::Log;
 use Slim::Menu::GlobalSearch;
+use Slim::Menu::TrackInfo;
 use Slim::Utils::Prefs;
 use Slim::Utils::Strings qw(cstring string);
 use Slim::Player::ProtocolHandlers;
@@ -319,6 +320,13 @@ sub postinitPlugin {
     } else {
         $log->info("youtube:// already handled by another plugin, skipping URL handler registration");
     }
+
+    # "Go to artist" in the track menu (long press / More / info) of every
+    # YouTube Music track, wherever it is listed - and in the queue.
+    Slim::Menu::TrackInfo->registerInfoProvider( youtubemusic_artist => (
+        after => 'playitem',
+        func  => \&_trackinfo_artist,
+    ));
 
     # Register global search provider (closures capture query+type)
     Slim::Menu::GlobalSearch->registerInfoProvider( 'YouTube' => (
@@ -1056,6 +1064,44 @@ sub _history_menu {
             return $callback->({ items => [] });
         }
         $callback->({ items => _items_to_menu($client, $data->{items} // [], { playall => 1 }), playall => 1 });
+    });
+}
+
+sub _trackinfo_artist {
+    my ($client, $url, $track, $remoteMeta) = @_;
+    my ($vid) = ($url // '') =~ m{^ytm://([A-Za-z0-9_\-]+)};
+    return unless $vid;
+    return {
+        type        => 'link',
+        name        => cstring($client, 'PLUGIN_YOUTUBEMUSIC_GO_TO_ARTIST'),
+        url         => \&_song_artist_menu,
+        passthrough => [{ videoId => $vid }],
+        favorites   => 0,
+    };
+}
+
+# The song's artist page; a choice first when it has several artists.
+sub _song_artist_menu {
+    my ($client, $callback, $args, $params) = @_;
+
+    Plugins::YouTubeMusic::API->getSongLinks($params->{videoId}, sub {
+        my $artists = ($_[0] && ref $_[0] eq 'HASH' && $_[0]->{artists}) || [];
+        if (!@$artists) {
+            return $callback->({ items => [{
+                type => 'text',
+                name => cstring($client, 'PLUGIN_YOUTUBEMUSIC_NO_ARTIST'),
+            }] });
+        }
+        if (@$artists == 1) {
+            return _artist_menu($client, $callback, $args, { browseId => $artists->[0]{browseId} });
+        }
+        $callback->({ items => [ map {
+            {
+                name        => $_->{name},
+                url         => \&_artist_menu,
+                passthrough => [{ browseId => $_->{browseId} }],
+            }
+        } @$artists ] });
     });
 }
 
