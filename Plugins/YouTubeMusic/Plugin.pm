@@ -669,14 +669,19 @@ sub _cliRecentSearches {
 sub _search_dispatch {
     my ($client, $callback, $args, $params) = @_;
 
-    my $query = $args->{search} || ($params && $params->{query}) || '';
+    my $typed = $args->{search} // '';
+    my $query = $typed || ($params && $params->{query}) || '';
 
     unless ($query) {
         $callback->({ items => [] });
         return;
     }
 
-    _add_recent_search($query);
+    # Only newly typed searches change the history. Re-running one from the
+    # history must not move it: LMS menus navigate by position and re-fetch
+    # the list on each step, so reordering it would open another search's
+    # results (as Spotty also avoids).
+    _add_recent_search($query) if $typed;
 
     my @type_menus = map {
         my ($key, $label) = @$_;
