@@ -4,14 +4,14 @@
     <title lang="EN">YouTube Music for LMS</title>
   </details>
   <plugins>
-    <plugin name="YouTubeMusic" version="1.4.11" minTarget="9.0" maxTarget="*">
+    <plugin name="YouTubeMusic" version="1.5.0" minTarget="9.0" maxTarget="*">
       <title lang="EN">YouTube Music</title>
       <desc lang="EN">Browse, search, and stream YouTube Music to your Squeezebox players.</desc>
-      <changes lang="EN">Fix touch-to-play and play-all on hardware players and phone apps for deep menus (My Library, Albums, Speed Dial, Search results).</changes>
+      <changes lang="EN">Recent search history; automatic unplayable track replacement; podcast/ARM HLS streaming fix; playlist search fix; menu reordered.</changes>
       <creator>schmij97</creator>
       <category>musicservices</category>
-      <url>https://github.com/schmij97/lms-ytmusic/releases/download/v1.4.11/YouTubeMusic-1.4.11.zip</url>
-      <sha>e4ce36e2e424b7d710b9dc8c4b20acd43af2518e</sha>
+      <url>https://github.com/schmij97/lms-ytmusic/releases/download/v1.5.0/YouTubeMusic-1.5.0.zip</url>
+      <sha>f4f8495036232e37a6f4e394dc02c43316d2d8b0f3831d7db97248f35daf9c18</sha>
     </plugin>
   </plugins>
 </extensions>
