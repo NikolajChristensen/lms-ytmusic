@@ -4,14 +4,14 @@
     <title lang="EN">YouTube Music for LMS (NikolajChristensen fork)</title>
   </details>
   <plugins>
-    <plugin name="YouTubeMusic" version="1.5.0.14" minTarget="9.0" maxTarget="*">
+    <plugin name="YouTubeMusic" version="1.5.1.1" minTarget="9.0" maxTarget="*">
       <title lang="EN">YouTube Music</title>
       <desc lang="EN">Browse, search, and stream YouTube Music to your Squeezebox players.</desc>
       <changes lang="EN">Sections in New Releases (and mood/genre lists) now have their real names (Albums &amp; singles, Music videos) instead of all being called "New Releases". New icon. "Go to artist" / "Go to album" in every track's menu. Tracks no longer stop early when a download is cut off. Podcasts menu hidden. Based on upstream 1.5.1, plus download priority within 2 downloads.</changes>
       <creator>schmij97, NikolajChristensen</creator>
       <category>musicservices</category>
-      <url>https://github.com/NikolajChristensen/lms-ytmusic/releases/download/v1.5.0.14/YouTubeMusic-1.5.0.14.zip</url>
-      <sha>890359356b462e4f303a149f1856b502bc28286b</sha>
+      <url>https://github.com/NikolajChristensen/lms-ytmusic/releases/download/v1.5.1.1/YouTubeMusic-1.5.1.1.zip</url>
+      <sha>178de8daabcc650068354cda587ea179dcf45e69</sha>
     </plugin>
   </plugins>
 </extensions>
