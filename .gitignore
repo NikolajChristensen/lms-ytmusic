@@ -11,3 +11,9 @@ Plugins/YouTubeMusic/yt-dlp_linux
 Plugins/YouTubeMusic/yt-dlp_macos
 Plugins/YouTubeMusic/Bin/
 dist/
+.env
+.env.*
+*.token
+secrets.yaml
+__pycache__/
+*.pyc
