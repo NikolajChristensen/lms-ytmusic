@@ -17,6 +17,7 @@ your account without --apply.
 
   ytm-follow-artists.py --history DIR --save artists.json     # dry run, report
   ytm-follow-artists.py --matches artists.json --apply         # follow them
+(--matches also takes a link to the file: --matches https://example.com/artists.json)
 Options: --include-uncertain, --min-plays N, --plugin-dir DIR
 
 --apply runs on the Lyrion server: it uses the login saved in the plugin's
@@ -163,7 +164,13 @@ def main():
     ytm = load_plugin(a.plugin_dir)
 
     if a.matches:
-        results = json.load(open(a.matches, encoding="utf-8"))
+        if re.match(r"https?://", a.matches):
+            import urllib.request
+            print(f"Downloading {a.matches} ...")
+            with urllib.request.urlopen(a.matches, timeout=60) as r:
+                results = json.loads(r.read().decode("utf-8"))
+        else:
+            results = json.load(open(a.matches, encoding="utf-8"))
     else:
         history = read_history(a.history) if a.history else {}
         names = read_library(a.library) if a.library else []
@@ -207,8 +214,19 @@ def main():
     have = {s.get("browseId") for s in yt.get_library_subscriptions(limit=None)}
     new = [i for i in ids if i not in have]
     print(f"\nAlready following {len(ids) - len(new)} of them; following {len(new)} more...")
-    for i in range(0, len(new), 50):
-        yt.subscribe_artists(new[i:i + 50])
+    import time
+    failed = 0
+    for i, bid in enumerate(new, 1):                       # YouTube Music takes one artist at a time
+        try:
+            yt.subscribe_artist(bid)
+        except Exception as e:
+            failed += 1
+            print(f"\n  failed {bid}: {e}")
+        print(f"\r  {i}/{len(new)}", end="", flush=True)
+        time.sleep(0.5)
+    print()
+    if failed:
+        print(f"{failed} failed; run the same command again to retry them (followed artists are skipped).")
     print(f"Done. They appear under My Library > Artists in Lyrion within 10 minutes.")
 
 
