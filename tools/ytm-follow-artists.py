@@ -4,7 +4,8 @@
 Input (one or both):
   --library FILE   YourLibrary.json from Spotify's "Account data" download:
                    the artists you follow there
-  --history DIR    "Spotify Extended Streaming History" folder: artists you
+  --history DIR    folder with your streaming history ("Extended Streaming
+                   History", or the "Account data" download): artists you
                    have played at least --min-plays times (default 25; a play
                    counts from 30 seconds)
 
@@ -42,15 +43,20 @@ def read_library(path):
 
 
 def read_history(folder):
-    """{artist: {"plays": n, "tracks": [most played first]}}"""
+    """{artist: {"plays": n, "tracks": [most played first]}}
+
+    Reads the Extended Streaming History (Streaming_History_Audio_*.json) or,
+    in an "Account data" download, StreamingHistory_music_*.json."""
     plays, tracks = collections.Counter(), collections.defaultdict(collections.Counter)
-    files = glob.glob(os.path.join(folder, "Streaming_History_Audio_*.json"))
-    if not files:
-        sys.exit(f"No Streaming_History_Audio_*.json files in {folder}")
-    for f in files:
+    files = glob.glob(os.path.join(folder, "**", "Streaming_History_Audio_*.json"), recursive=True)
+    files_basic = glob.glob(os.path.join(folder, "**", "StreamingHistory_music_*.json"), recursive=True)
+    if not files and not files_basic:
+        sys.exit(f"No Streaming_History_Audio_*.json or StreamingHistory_music_*.json files in {folder}")
+    for f in files + files_basic:
         for e in json.load(open(f, encoding="utf-8")):
-            a, t = e.get("master_metadata_album_artist_name"), e.get("master_metadata_track_name")
-            if a and t and e.get("ms_played", 0) >= 30000:
+            a = e.get("master_metadata_album_artist_name") or e.get("artistName")
+            t = e.get("master_metadata_track_name") or e.get("trackName")
+            if a and t and (e.get("ms_played") or e.get("msPlayed") or 0) >= 30000:
                 plays[a] += 1
                 tracks[a][t] += 1
     return {a: {"plays": n, "tracks": [t for t, _ in tracks[a].most_common(3)]} for a, n in plays.items()}
