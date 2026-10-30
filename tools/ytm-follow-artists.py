@@ -70,6 +70,15 @@ def _norm(s):
     return re.sub(r"[^a-z0-9]+", " ", s.replace("&", " and ")).strip()
 
 
+def _album_artists(ytm, album_id):
+    """Artists linked from an album page: [{name, browseId}]"""
+    page = json.dumps(ytm._post("browse", {"browseId": album_id}))
+    found = {}
+    for name, bid in re.findall(r'"text": "([^"]+)", "navigationEndpoint": \{[^}]*"browseEndpoint": \{"browseId": "(UC[^"]+)"', page):
+        found[bid] = json.loads('"' + name + '"')
+    return [{"name": n, "browseId": b} for b, n in found.items()]
+
+
 def match(ytm, name, tracks):
     """('good'|'uncertain'|'missing', {name, browseId}, how)"""
     want = _norm(name)
@@ -103,6 +112,18 @@ def match(ytm, name, tracks):
     if found and (want in _norm(found[0].get("name")) or _norm(found[0].get("name")) in want):
         r = found[0]
         return "uncertain", {"name": r["name"], "browseId": r["browseId"]}, "similar name"
+    # The artist search doesn't list everyone; some artists only turn up through
+    # their songs or albums.
+    for s in ytm.search(name, "songs")[:6]:
+        if s.get("videoId") and want in _norm(s.get("artist")):
+            for a in ytm.get_song_links(s["videoId"]).get("artists", []):
+                if _norm(a["name"]) == want:
+                    return "uncertain", {"name": a["name"], "browseId": a["browseId"]}, "found via a song"
+    for al in ytm.search(name, "albums")[:6]:
+        if al.get("browseId"):
+            for a in _album_artists(ytm, al["browseId"]):
+                if _norm(a["name"]) == want:
+                    return "uncertain", {"name": a["name"], "browseId": a["browseId"]}, "found via an album"
     return "missing", None, ""
 
 
