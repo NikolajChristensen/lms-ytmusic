@@ -7,7 +7,7 @@
     <plugin name="YouTubeMusic" version="1.5.1.2" minTarget="9.0" maxTarget="*">
       <title lang="EN">YouTube Music</title>
       <desc lang="EN">Browse, search, and stream YouTube Music to your Squeezebox players.</desc>
-      <changes lang="EN">Fixes the server running out of memory (and crashing) on small machines when two tracks start at the same moment: only one stream link is decoded at a time. Sections in New Releases now have their real names. New icon. "Go to artist" / "Go to album" in every track's menu. Tracks no longer stop early when a download is cut off. Podcasts menu hidden. Based on upstream 1.5.1, plus download priority within 2 downloads.</changes>
+      <changes lang="EN">My Library > Artists and Albums are now sorted alphabetically (albums by artist, then title), and all followed artists are listed, not just the first 500. Also: fixes the server running out of memory on small machines when two tracks start at once; real section names in New Releases; new icon; "Go to artist" / "Go to album" in every track's menu; tracks no longer stop early when a download is cut off; Podcasts menu hidden. Based on upstream 1.5.1, plus download priority within 2 downloads.</changes>
       <creator>schmij97, NikolajChristensen</creator>
       <category>musicservices</category>
       <url>https://github.com/NikolajChristensen/lms-ytmusic/releases/download/v1.5.1.2/YouTubeMusic-1.5.1.2.zip</url>
