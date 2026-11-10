@@ -1727,6 +1727,10 @@ def start_prefetch(video_id, urgent=False):
             _prefetch_urgent.add(video_id)   # also lifts one already waiting
         if video_id in _prefetch_started:
             return "in_progress"
+        if not urgent:
+            with _urgent_extracting_lock:
+                if _urgent_extracting:
+                    return "deferred"
         _prefetch_started.add(video_id)
 
     _cleanup_old_prefetch()
@@ -2177,8 +2181,15 @@ import threading as _threading
 _ydl_instance = None
 _ydl_lock = _threading.Lock()
 _ydl_available = None  # None=unknown, True=available, False=not available
-# Each extraction runs a Node process (~200 MB); two at once can exhaust a 512 MB container
-_extract_lock = _threading.Lock()
+# Each extraction can run its own ~200 MB Node process (when the persistent
+# worker is unavailable), and two at once can exhaust a 512 MB container. A
+# blocking lock around every extraction fixed that but also made urgent
+# (foreground) playback wait behind a slower background prefetch's whole
+# extraction. Instead, track which video IDs have an urgent extraction in
+# flight right now, so start_prefetch can have new background prefetches
+# step aside instead of contending with them.
+_urgent_extracting = set()
+_urgent_extracting_lock = _threading.Lock()
 
 def _get_ydl():
     """Get or create the persistent YoutubeDL instance."""
@@ -2238,8 +2249,7 @@ def _get_audio_url(video_id):
         if ydl is None:
             return None
         url = f"https://music.youtube.com/watch?v={video_id}"
-        with _extract_lock:
-            info = ydl.extract_info(url, download=False)
+        info = ydl.extract_info(url, download=False)
         if not info:
             return None
         # Get the best audio URL
@@ -2441,7 +2451,16 @@ def stream_audio(video_id, _replacing=None):
     # Try persistent YDL first (faster — no subprocess startup)
     import time as _time
     _t0 = _time.monotonic()
-    audio_url = _get_audio_url(video_id)
+    _urgent = video_id in _prefetch_urgent
+    if _urgent:
+        with _urgent_extracting_lock:
+            _urgent_extracting.add(video_id)
+    try:
+        audio_url = _get_audio_url(video_id)
+    finally:
+        if _urgent:
+            with _urgent_extracting_lock:
+                _urgent_extracting.discard(video_id)
     _t1 = _time.monotonic()
     _log_fn = logging.warning if audio_url else (logging.info if _ydl_available is False else logging.warning)
     _log_fn("PREFETCH_YDL videoId=%s extraction=%.2fs url=%s", video_id, _t1-_t0, "OK" if audio_url else "FAIL")
