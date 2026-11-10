@@ -4,14 +4,14 @@
     <title lang="EN">YouTube Music for LMS (NikolajChristensen fork)</title>
   </details>
   <plugins>
-    <plugin name="YouTubeMusic" version="1.5.1.4" minTarget="9.0" maxTarget="*">
+    <plugin name="YouTubeMusic" version="1.5.1.5" minTarget="9.0" maxTarget="*">
       <title lang="EN">YouTube Music</title>
       <desc lang="EN">Browse, search, and stream YouTube Music to your Squeezebox players.</desc>
-      <changes lang="EN">Fixes My Library and other personal playlists getting capped at around 100 tracks. Also: Artists and Albums are sorted alphabetically (albums by artist, then title), and all followed artists are listed, not just the first 500; fixes the server running out of memory on small machines when two tracks start at once; real section names in New Releases; new icon; "Go to artist" / "Go to album" in every track's menu; tracks no longer stop early when a download is cut off; Podcasts menu hidden. Based on upstream 1.5.1, plus download priority within 2 downloads.</changes>
+      <changes lang="EN">A background prefetch no longer makes a track you're actually starting wait behind it for its stream link - only new background prefetches step aside while a real playback start is resolving one. Previously fixes My Library and other personal playlists getting capped at around 100 tracks. Also: Artists and Albums are sorted alphabetically (albums by artist, then title), and all followed artists are listed, not just the first 500; fixes the server running out of memory on small machines when two tracks start at once; real section names in New Releases; new icon; "Go to artist" / "Go to album" in every track's menu; tracks no longer stop early when a download is cut off; Podcasts menu hidden. Based on upstream 1.5.1, plus download priority within 2 downloads.</changes>
       <creator>schmij97, NikolajChristensen</creator>
       <category>musicservices</category>
-      <url>https://github.com/NikolajChristensen/lms-ytmusic/releases/download/v1.5.1.4/YouTubeMusic-1.5.1.4.zip</url>
-      <sha>6f192380ffaba77e56411049f2788009be8ef675</sha>
+      <url>https://github.com/NikolajChristensen/lms-ytmusic/releases/download/v1.5.1.5/YouTubeMusic-1.5.1.5.zip</url>
+      <sha>b2ed3d436d9e1ba6c3060116ca30da118c89b69c</sha>
     </plugin>
   </plugins>
 </extensions>
