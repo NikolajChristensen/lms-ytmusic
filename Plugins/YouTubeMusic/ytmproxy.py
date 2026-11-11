@@ -2576,7 +2576,11 @@ def stream_audio(video_id, _replacing=None):
                 stderr_out = ffmpeg_proc.stderr.read().decode("utf-8", errors="replace").strip()
                 ffmpeg_proc.wait()
                 if stderr_out and (got == 0 or ffmpeg_proc.returncode):
-                    logging.warning("ffmpeg URL stderr: %s", stderr_out[:500])
+                    # The CDN URL alone (logged as context) can run past 400
+                    # chars, so a flat [:500] slice often truncates away the
+                    # actual error message that follows it - keep the tail.
+                    logging.warning("ffmpeg URL failed (rc=%s): %s",
+                                    ffmpeg_proc.returncode, stderr_out[-800:])
             short = _is_short(bytes_sent, expected, ffmpeg_proc.returncode)
             if not bytes_sent or not short or not got or _AUDIO_FORMAT != "mp3":
                 break
