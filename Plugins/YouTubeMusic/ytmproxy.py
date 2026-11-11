@@ -2447,6 +2447,48 @@ def _url_duration(audio_url):
     return float(m.group(1)) if m else None
 
 
+def _url_length(audio_url):
+    """File size in bytes from a CDN URL's clen= parameter, or None."""
+    m = re.search(r"[?&]clen=([0-9]+)", audio_url or "")
+    return int(m.group(1)) if m else None
+
+
+# The CDN throttles a request covering more than this (or one with no Range
+# header) to ~40 KB/s - minutes instead of seconds for a long track. yt-dlp's
+# own downloader uses the same chunk size for the same reason.
+_CDN_CHUNK = 10 * 1024 * 1024
+
+
+def _feed_cdn(url, headers, total, sink):
+    """Copy a CDN URL of `total` bytes into `sink` in ranged requests of at
+    most _CDN_CHUNK bytes, resuming at the byte a dropped connection stopped
+    at, then close `sink` so its reader sees the end."""
+    pos = failures = 0
+    try:
+        while pos < total and failures < 3:
+            start = pos
+            end = min(pos + _CDN_CHUNK, total) - 1
+            req = urllib.request.Request(url, headers={**headers, "Range": f"bytes={pos}-{end}"})
+            try:
+                with urllib.request.urlopen(req, timeout=15) as r:
+                    while True:
+                        buf = r.read(65536)
+                        if not buf:
+                            break
+                        sink.write(buf)
+                        pos += len(buf)
+            except (BrokenPipeError, ValueError):
+                return   # ffmpeg exited, or the stream was closed
+            except Exception as e:
+                logging.warning("CDN fetch at byte %d of %d failed: %s", pos, total, e)
+            failures = 0 if pos > start else failures + 1
+    finally:
+        try:
+            sink.close()
+        except Exception:
+            pass
+
+
 def _is_short(nbytes, expected, returncode):
     """Did a download end before the end of the track? For MP3 the size
     tells; for other formats only ffmpeg's exit status does."""
@@ -2542,7 +2584,13 @@ def stream_audio(video_id, _replacing=None):
         _wait = (_available_at or 0) - time.time()
         if _wait > 0:
             logging.info("Waiting %.1fs for %s's stream URL to become valid", _wait, video_id)
-            time.sleep(min(_wait, 15))
+            _until = time.time() + min(_wait, 15)
+            while time.time() < _until:
+                # A prefetch cancelled to free its slot must let go now,
+                # not after the wait.
+                if video_id in _prefetch_cancel:
+                    raise _PrefetchCancelled()
+                time.sleep(0.25)
         # Use the exact User-Agent/headers yt-dlp picked for whichever
         # client it resolved this URL with - a mismatched User-Agent can
         # get the CDN to reject the connection even when the URL itself
@@ -2554,21 +2602,25 @@ def stream_audio(video_id, _replacing=None):
         _headers.setdefault("Accept", "*/*")
         _headers.setdefault("Accept-Language", "en-us,en;q=0.5")
         _header_str = "".join(f"{k}: {v}\r\n" for k, v in _headers.items())
+        # Known size: fetch it ourselves in throttle-free chunks and pipe it
+        # in (see _CDN_CHUNK); otherwise let ffmpeg open the URL itself.
+        _total = _url_length(audio_url)
 
         def ffmpeg_url_cmd(offset):
-            cmd = [
-                _find_ffmpeg(), "-loglevel", "error",
-                "-user_agent", _ua,
-                "-headers", _header_str,
-                # The CDN sometimes drops the connection part-way through;
-                # without these ffmpeg just ends there.
-                "-reconnect", "1", "-reconnect_streamed", "1",
-                "-reconnect_on_network_error", "1", "-reconnect_delay_max", "5",
-            ]
+            cmd = [_find_ffmpeg(), "-loglevel", "error"]
+            if not _total:
+                cmd += [
+                    "-user_agent", _ua,
+                    "-headers", _header_str,
+                    # The CDN sometimes drops the connection part-way through;
+                    # without these ffmpeg just ends there.
+                    "-reconnect", "1", "-reconnect_streamed", "1",
+                    "-reconnect_on_network_error", "1", "-reconnect_delay_max", "5",
+                ]
             if offset:
                 cmd += ["-ss", f"{offset:.3f}"]
             cmd += [
-                "-i", audio_url,
+                "-i", "pipe:0" if _total else audio_url,
                 "-vn", "-map_metadata", "-1",
                 "-id3v2_version", "0", "-write_id3v1", "0",
                 "-f", _AUDIO_FORMAT, "-codec:a", _AUDIO_CODEC,
@@ -2586,7 +2638,12 @@ def stream_audio(video_id, _replacing=None):
         bytes_sent = 0
         for attempt in range(3):
             ffmpeg_proc = subprocess.Popen(ffmpeg_url_cmd(bytes_sent / _MP3_BYTES_PER_SEC if bytes_sent else 0),
+                                           stdin=subprocess.PIPE if _total else subprocess.DEVNULL,
                                            stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            if _total:
+                threading.Thread(target=_feed_cdn,
+                                 args=(audio_url, {**_headers, "User-Agent": _ua}, _total, ffmpeg_proc.stdin),
+                                 daemon=True).start()
             got = 0
             try:
                 while True:
