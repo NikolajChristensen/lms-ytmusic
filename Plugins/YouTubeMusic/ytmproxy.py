@@ -2226,14 +2226,6 @@ _ydl_available = None  # None=unknown, True=available, False=not available
 _urgent_extracting = set()
 _urgent_extracting_lock = _threading.Lock()
 
-# Off (2026-11-11): feeding a persistent-YDL-resolved CDN URL straight to
-# ffmpeg gets 403 Forbidden on live testing regardless of which YouTube
-# client got picked (seen with both web_embedded and TVHTML5) - yt-dlp's
-# own downloader has retry/fallback-across-clients handling this shortcut
-# doesn't replicate. Flip back on once that's reimplemented on top of
-# yt-dlp's own downloader instead of a bare ffmpeg -i <url>.
-_FAST_DIRECT_DOWNLOAD_ENABLED = False
-
 def _get_ydl():
     """Get or create the persistent YoutubeDL instance."""
     global _ydl_instance, _ydl_available
@@ -2292,29 +2284,26 @@ def _get_ydl():
     return _ydl_instance
 
 def _get_audio_url(video_id):
-    """Use persistent YoutubeDL to extract the audio URL and the HTTP
-    headers (User-Agent etc.) yt-dlp picked to match whichever client it
-    resolved the URL with. Returns (url, headers) or (None, None)."""
+    """Use persistent YoutubeDL to extract the audio URL, the HTTP headers
+    (User-Agent etc.) yt-dlp picked for the client it resolved the URL with,
+    and the format's available_at: some clients' URLs answer 403 until a few
+    seconds after they're issued, and yt-dlp's own downloader sleeps until
+    then. Returns (url, headers, available_at) or (None, None, None)."""
     try:
         ydl = _get_ydl()
         if ydl is None:
-            return None, None
+            return None, None, None
         url = f"https://music.youtube.com/watch?v={video_id}"
         info = ydl.extract_info(url, download=False)
         if not info:
-            return None, None
-        # Get the best audio URL
-        if 'url' in info:
-            return info['url'], info.get('http_headers')
-        # Try formats
-        formats = info.get('formats', [])
-        if formats:
-            fmt = formats[-1]
-            return fmt.get('url'), fmt.get('http_headers')
-        return None, None
+            return None, None, None
+        fmt = info if 'url' in info else (info.get('formats') or [None])[-1]
+        if not fmt:
+            return None, None, None
+        return fmt.get('url'), fmt.get('http_headers'), fmt.get('available_at')
     except Exception as e:
         logging.warning("YDL extract failed for %s: %s", video_id, e)
-        return None, None
+        return None, None, None
 
 def _compile_ytdlp_bytecode():
     """Pre-compile yt-dlp Python source to .pyc bytecode for faster startup on slow ARM CPUs."""
@@ -2500,28 +2489,22 @@ def stream_audio(video_id, _replacing=None):
         ffmpeg_cmd += ["-sample_fmt", "s16"]
     ffmpeg_cmd.append("pipe:1")
 
-    # Try persistent YDL first (faster — no subprocess startup) - except its
-    # result currently has nowhere to go: the direct ffmpeg-to-CDN-URL path
-    # below is disabled (see comment there), so running this extraction
-    # would just add ~2s of pure overhead with no benefit. Re-enable once
-    # that path is reimplemented on top of yt-dlp's own downloader.
-    audio_url, _audio_headers = None, None
-    if _FAST_DIRECT_DOWNLOAD_ENABLED:
-        import time as _time
-        _t0 = _time.monotonic()
-        _urgent = video_id in _prefetch_urgent
+    # Try persistent YDL first (faster — no subprocess startup)
+    import time as _time
+    _t0 = _time.monotonic()
+    _urgent = video_id in _prefetch_urgent
+    if _urgent:
+        with _urgent_extracting_lock:
+            _urgent_extracting.add(video_id)
+    try:
+        audio_url, _audio_headers, _available_at = _get_audio_url(video_id)
+    finally:
         if _urgent:
             with _urgent_extracting_lock:
-                _urgent_extracting.add(video_id)
-        try:
-            audio_url, _audio_headers = _get_audio_url(video_id)
-        finally:
-            if _urgent:
-                with _urgent_extracting_lock:
-                    _urgent_extracting.discard(video_id)
-        _t1 = _time.monotonic()
-        _log_fn = logging.warning if audio_url else (logging.info if _ydl_available is False else logging.warning)
-        _log_fn("PREFETCH_YDL videoId=%s extraction=%.2fs url=%s", video_id, _t1-_t0, "OK" if audio_url else "FAIL")
+                _urgent_extracting.discard(video_id)
+    _t1 = _time.monotonic()
+    _log_fn = logging.warning if audio_url else (logging.info if _ydl_available is False else logging.warning)
+    _log_fn("PREFETCH_YDL videoId=%s extraction=%.2fs url=%s", video_id, _t1-_t0, "OK" if audio_url else "FAIL")
     _NODE_PATH = _find_node()
     ytdlp_cmd = [
         ytdlp,
@@ -2552,10 +2535,14 @@ def stream_audio(video_id, _replacing=None):
     # Seconds of audio the CDN URL says the track has (its dur= parameter), so
     # a download that ends early can be told apart from a finished one.
     expected = _url_duration(audio_url)
-    # audio_url is always None here while _FAST_DIRECT_DOWNLOAD_ENABLED is
-    # False (see its definition) - this block is dead until that's flipped
-    # back on.
     if audio_url and not _is_hls and not _is_arm:
+        # The CDN answers 403 until the format's available_at (a few seconds
+        # after issue for some clients) - wait it out, as yt-dlp's own
+        # downloader does, instead of failing over to the slow path.
+        _wait = (_available_at or 0) - time.time()
+        if _wait > 0:
+            logging.info("Waiting %.1fs for %s's stream URL to become valid", _wait, video_id)
+            time.sleep(min(_wait, 15))
         # Use the exact User-Agent/headers yt-dlp picked for whichever
         # client it resolved this URL with - a mismatched User-Agent can
         # get the CDN to reject the connection even when the URL itself
