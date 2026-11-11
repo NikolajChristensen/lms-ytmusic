@@ -1788,16 +1788,9 @@ def _platform_ytdlp_asset():
 
 
 def _install_ytdlp_wheel(release=None):
-    """Install the importable yt_dlp Python package into BIN_DIR, alongside
-    whatever yt-dlp binary is already there. Platforms with a standalone
-    yt-dlp binary (most Linux servers, including this one) have no package
-    to import, so _get_ydl() never creates the persistent YoutubeDL instance
-    - every track falls back to a fresh yt-dlp subprocess, which in turn
-    cold-starts a fresh Node process to solve YouTube's JS challenge, taking
-    several seconds neither cost needs to pay. Installing the wheel next to
-    the binary (used only for -U self-update) lets the persistent instance -
-    and its routing of JS challenges through the already-running Node
-    worker - actually activate. Returns (ok, message)."""
+    """Install the importable yt_dlp package into BIN_DIR, next to the yt-dlp
+    binary. The persistent YoutubeDL instance needs it; a standalone binary
+    (most Linux installs) doesn't provide it. Returns (ok, message)."""
     import urllib.request, zipfile, io
     try:
         if release is None:
@@ -1908,11 +1901,7 @@ def download_ytdlp():
             os.chmod(YTDLP_BIN, 0o755)
 
         logging.info("yt-dlp %s installed to %s", version, YTDLP_BIN)
-        # Also install the importable package alongside the binary so the
-        # persistent YoutubeDL instance can be used instead of spawning a
-        # subprocess (and a fresh Node process) per track. Best-effort: the
-        # binary install above already succeeded, so a failure here just
-        # means the subprocess fallback keeps being used, same as before.
+        # Best-effort: without it, playback just keeps using the subprocess.
         _install_ytdlp_wheel(release)
         return True, version
 
@@ -2216,13 +2205,9 @@ import threading as _threading
 _ydl_instance = None
 _ydl_lock = _threading.Lock()
 _ydl_available = None  # None=unknown, True=available, False=not available
-# Each extraction can run its own ~200 MB Node process (when the persistent
-# worker is unavailable), and two at once can exhaust a 512 MB container. A
-# blocking lock around every extraction fixed that but also made urgent
-# (foreground) playback wait behind a slower background prefetch's whole
-# extraction. Instead, track which video IDs have an urgent extraction in
-# flight right now, so start_prefetch can have new background prefetches
-# step aside instead of contending with them.
+# Video IDs whose urgent (playback) extraction is in flight. Each extraction
+# can run a ~200 MB Node process, and two at once can exhaust a 512 MB
+# container, so start_prefetch holds off new background prefetches meanwhile.
 _urgent_extracting = set()
 _urgent_extracting_lock = _threading.Lock()
 
@@ -2265,13 +2250,9 @@ def _get_ydl():
                     'socket_timeout': 10,
                     'retries': 2,
                     'extractor_retries': 2,
-                    # Don't force a specific client: web_embedded now sits
-                    # behind YouTube's "bind GVS PO Token to video ID"
-                    # experiment, and without a PO token the CDN 403s every
-                    # download - confirmed live (ytmproxy.log, 2026-11-11)
-                    # and reproduced locally. Let yt-dlp pick its own
-                    # default, same as the subprocess fallback below
-                    # already does (successfully) when this fails.
+                    # No forced player_client: let yt-dlp pick, as the
+                    # subprocess does. Forcing one breaks whenever YouTube
+                    # starts requiring a PO token for it (web_embedded did).
                     'cachedir': os.path.join(BIN_DIR, 'ytdlp_cache'),
                     'js_runtimes': js_runtimes,
                 }
@@ -2284,11 +2265,8 @@ def _get_ydl():
     return _ydl_instance
 
 def _get_audio_url(video_id):
-    """Use persistent YoutubeDL to extract the audio URL, the HTTP headers
-    (User-Agent etc.) yt-dlp picked for the client it resolved the URL with,
-    and the format's available_at: some clients' URLs answer 403 until a few
-    seconds after they're issued, and yt-dlp's own downloader sleeps until
-    then. Returns (url, headers, available_at) or (None, None, None)."""
+    """Extract the audio format with the persistent YoutubeDL. Returns its
+    (url, http_headers, available_at), or (None, None, None)."""
     try:
         ydl = _get_ydl()
         if ydl is None:
@@ -2489,6 +2467,55 @@ def _feed_cdn(url, headers, total, sink):
             pass
 
 
+def _stream_direct(video_id, audio_url, headers, available_at, ffmpeg_cmd, expected):
+    """Yield audio for a CDN URL resolved in-process: _feed_cdn fetches it,
+    ffmpeg (reading stdin) transcodes it. Returns the bytes yielded, so 0
+    tells the caller to fall back to the yt-dlp subprocess."""
+    # The CDN answers 403 until available_at, a few seconds after issue.
+    wait_until = min(available_at or 0, time.time() + 15)
+    while time.time() < wait_until:
+        if video_id in _prefetch_cancel:   # cancelled to free its slot
+            raise _PrefetchCancelled()
+        time.sleep(0.25)
+    total = _url_length(audio_url)
+    # If the download still ends short of the track's length, carry on
+    # from where it stopped. MP3 is 192 kbps CBR, so the bytes sent give
+    # the position; the pieces join into one continuous MP3 stream.
+    sent = 0
+    for attempt in range(3):
+        cmd = list(ffmpeg_cmd)
+        if sent:
+            cmd[cmd.index("-i"):cmd.index("-i")] = ["-ss", f"{sent / _MP3_BYTES_PER_SEC:.3f}"]
+        proc = subprocess.Popen(cmd, stdin=subprocess.PIPE,
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        threading.Thread(target=_feed_cdn, args=(audio_url, headers, total, proc.stdin),
+                         daemon=True).start()
+        got = 0
+        try:
+            while True:
+                chunk = proc.stdout.read(65536)
+                if not chunk:
+                    break
+                got += len(chunk)
+                sent += len(chunk)
+                yield chunk
+        finally:
+            proc.stdout.close()
+            err = proc.stderr.read().decode("utf-8", errors="replace").strip()
+            proc.wait()
+            if err and (got == 0 or proc.returncode):
+                logging.warning("ffmpeg failed for %s (rc=%s): %s", video_id, proc.returncode, err[-800:])
+        short = _is_short(sent, expected, proc.returncode)
+        if not sent or not short or not got or _AUDIO_FORMAT != "mp3":
+            break
+        logging.warning("%s download ended after %.0fs of %.0fs; continuing from there",
+                        video_id, sent / _MP3_BYTES_PER_SEC, expected or 0)
+    if sent and short:
+        # Don't let the prefetch keep this as the finished track.
+        raise RuntimeError(f"download of {video_id} ended early ({sent} bytes)")
+    return sent
+
+
 def _is_short(nbytes, expected, returncode):
     """Did a download end before the end of the track? For MP3 the size
     tells; for other formats only ffmpeg's exit status does."""
@@ -2532,21 +2559,19 @@ def stream_audio(video_id, _replacing=None):
     ffmpeg_cmd.append("pipe:1")
 
     # Try persistent YDL first (faster — no subprocess startup)
-    import time as _time
-    _t0 = _time.monotonic()
-    _urgent = video_id in _prefetch_urgent
-    if _urgent:
+    t0 = time.monotonic()
+    urgent = video_id in _prefetch_urgent
+    if urgent:
         with _urgent_extracting_lock:
             _urgent_extracting.add(video_id)
     try:
-        audio_url, _audio_headers, _available_at = _get_audio_url(video_id)
+        audio_url, audio_headers, available_at = _get_audio_url(video_id)
     finally:
-        if _urgent:
+        if urgent:
             with _urgent_extracting_lock:
                 _urgent_extracting.discard(video_id)
-    _t1 = _time.monotonic()
     _log_fn = logging.warning if audio_url else (logging.info if _ydl_available is False else logging.warning)
-    _log_fn("PREFETCH_YDL videoId=%s extraction=%.2fs url=%s", video_id, _t1-_t0, "OK" if audio_url else "FAIL")
+    _log_fn("PREFETCH_YDL videoId=%s extraction=%.2fs url=%s", video_id, time.monotonic() - t0, "OK" if audio_url else "FAIL")
     _NODE_PATH = _find_node()
     ytdlp_cmd = [
         ytdlp,
@@ -2566,115 +2591,19 @@ def stream_audio(video_id, _replacing=None):
         "-o", "-",
         url,
     ]
-    # Only use direct ffmpeg URL approach on non-ARM platforms.
-    # On ARM (Pi), YouTube's CDN silently times out ffmpeg connections,
-    # causing ffmpeg to hang indefinitely with no timeout and produce 0 bytes.
-    # HLS manifests also hang ffmpeg regardless of platform.
-    # yt-dlp subprocess handles both cases correctly.
-    import platform as _platform
-    _is_arm = _platform.machine().startswith(("arm", "aarch"))
-    _is_hls = audio_url and (".m3u8" in audio_url or "manifest.googlevideo.com" in audio_url)
     # Seconds of audio the CDN URL says the track has (its dur= parameter), so
     # a download that ends early can be told apart from a finished one.
     expected = _url_duration(audio_url)
-    if audio_url and not _is_hls and not _is_arm:
-        # The CDN answers 403 until the format's available_at (a few seconds
-        # after issue for some clients) - wait it out, as yt-dlp's own
-        # downloader does, instead of failing over to the slow path.
-        _wait = (_available_at or 0) - time.time()
-        if _wait > 0:
-            logging.info("Waiting %.1fs for %s's stream URL to become valid", _wait, video_id)
-            _until = time.time() + min(_wait, 15)
-            while time.time() < _until:
-                # A prefetch cancelled to free its slot must let go now,
-                # not after the wait.
-                if video_id in _prefetch_cancel:
-                    raise _PrefetchCancelled()
-                time.sleep(0.25)
-        # Use the exact User-Agent/headers yt-dlp picked for whichever
-        # client it resolved this URL with - a mismatched User-Agent can
-        # get the CDN to reject the connection even when the URL itself
-        # is valid. Fall back to a generic set if extraction didn't
-        # supply any (e.g. the subprocess yt-dlp path never reaches here).
-        _headers = dict(_audio_headers or {})
-        _ua = _headers.pop("User-Agent", None) or \
-            "Mozilla/5.0 (Linux; Android 6.0; Nexus 5) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Mobile Safari/537.36"
-        _headers.setdefault("Accept", "*/*")
-        _headers.setdefault("Accept-Language", "en-us,en;q=0.5")
-        _header_str = "".join(f"{k}: {v}\r\n" for k, v in _headers.items())
-        # Known size: fetch it ourselves in throttle-free chunks and pipe it
-        # in (see _CDN_CHUNK); otherwise let ffmpeg open the URL itself.
-        _total = _url_length(audio_url)
-
-        def ffmpeg_url_cmd(offset):
-            cmd = [_find_ffmpeg(), "-loglevel", "error"]
-            if not _total:
-                cmd += [
-                    "-user_agent", _ua,
-                    "-headers", _header_str,
-                    # The CDN sometimes drops the connection part-way through;
-                    # without these ffmpeg just ends there.
-                    "-reconnect", "1", "-reconnect_streamed", "1",
-                    "-reconnect_on_network_error", "1", "-reconnect_delay_max", "5",
-                ]
-            if offset:
-                cmd += ["-ss", f"{offset:.3f}"]
-            cmd += [
-                "-i", "pipe:0" if _total else audio_url,
-                "-vn", "-map_metadata", "-1",
-                "-id3v2_version", "0", "-write_id3v1", "0",
-                "-f", _AUDIO_FORMAT, "-codec:a", _AUDIO_CODEC,
-            ]
-            if _AUDIO_CODEC not in ("flac", "pcm_s16le"):
-                cmd += ["-b:a", "192k"]
-            if _AUDIO_CODEC == "flac":
-                cmd += ["-sample_fmt", "s16"]
-            cmd.append("pipe:1")
-            return cmd
-
-        # If the download still ends short of the track's length, carry on
-        # from where it stopped. MP3 is 192 kbps CBR, so the bytes sent give
-        # the position; the pieces join into one continuous MP3 stream.
-        bytes_sent = 0
-        for attempt in range(3):
-            ffmpeg_proc = subprocess.Popen(ffmpeg_url_cmd(bytes_sent / _MP3_BYTES_PER_SEC if bytes_sent else 0),
-                                           stdin=subprocess.PIPE if _total else subprocess.DEVNULL,
-                                           stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-            if _total:
-                threading.Thread(target=_feed_cdn,
-                                 args=(audio_url, {**_headers, "User-Agent": _ua}, _total, ffmpeg_proc.stdin),
-                                 daemon=True).start()
-            got = 0
-            try:
-                while True:
-                    chunk = ffmpeg_proc.stdout.read(65536)
-                    if not chunk:
-                        break
-                    got += len(chunk)
-                    bytes_sent += len(chunk)
-                    yield chunk
-            finally:
-                ffmpeg_proc.stdout.close()
-                stderr_out = ffmpeg_proc.stderr.read().decode("utf-8", errors="replace").strip()
-                ffmpeg_proc.wait()
-                if stderr_out and (got == 0 or ffmpeg_proc.returncode):
-                    # The CDN URL alone (logged as context) can run past 400
-                    # chars, so a flat [:500] slice often truncates away the
-                    # actual error message that follows it - keep the tail.
-                    logging.warning("ffmpeg URL failed (rc=%s): %s",
-                                    ffmpeg_proc.returncode, stderr_out[-800:])
-            short = _is_short(bytes_sent, expected, ffmpeg_proc.returncode)
-            if not bytes_sent or not short or not got or _AUDIO_FORMAT != "mp3":
-                break
-            logging.warning("%s download ended after %.0fs of %.0fs; continuing from there",
-                            video_id, bytes_sent / _MP3_BYTES_PER_SEC, expected or 0)
-        if bytes_sent > 0:
-            if short:
-                # Don't let the prefetch keep this as the finished track.
-                raise RuntimeError(f"download of {video_id} ended early ({bytes_sent} bytes)")
+    # Not on ARM: ffmpeg fetching the CDN directly used to hang there, and the
+    # in-process fetcher that replaced it hasn't been tried on ARM yet. URLs
+    # without clen= (e.g. HLS manifests) go to the subprocess too.
+    import platform as _platform
+    _is_arm = _platform.machine().startswith(("arm", "aarch"))
+    if audio_url and _url_length(audio_url) and not _is_arm:
+        if (yield from _stream_direct(video_id, audio_url, audio_headers or {},
+                                      available_at, ffmpeg_cmd, expected)):
             return
-        # Fallback: subprocess yt-dlp
-        logging.warning("ffmpeg URL produced 0 bytes for %s, falling back to subprocess", video_id)
+        logging.warning("Direct download produced 0 bytes for %s, falling back to subprocess", video_id)
     if _ydl_available is not False:
         logging.warning("Persistent YDL failed for %s, falling back to subprocess", video_id)
     else:
@@ -2958,11 +2887,7 @@ class _Handler(BaseHTTPRequestHandler):
                                 [ytdlp, "--version"],
                                 capture_output=True, text=True, timeout=10
                             )
-                            # Keep the importable package (used by the
-                            # persistent YoutubeDL instance) in step with
-                            # whatever version the binary just updated to -
-                            # also installs it the first time, on a host
-                            # that only had the standalone binary before.
+                            # Keep the importable package in step with the binary.
                             _install_ytdlp_wheel()
                             self._send_json({"status": "ok", "version": ver.stdout.strip()})
                         else:
@@ -3253,11 +3178,7 @@ def run(port=9876, log_level="INFO", codec="auto", log_file="", no_node_worker=F
                 logging.warning("yt-dlp auto-download failed: %s", msg)
         except Exception as e:
             logging.warning("yt-dlp auto-download error: %s", e)
-    # A host that got its yt-dlp binary before this package install was
-    # added (or whose platform only ships a standalone binary) has no
-    # importable yt_dlp — self-heal that now rather than waiting for the
-    # next "Update yt-dlp" click, so the persistent YoutubeDL instance
-    # activates on the next restart without any user action.
+    # Installs from before the package was installed alongside the binary.
     if _find_ytdlp() and not os.path.isdir(os.path.join(BIN_DIR, "yt_dlp")):
         logging.info("yt_dlp Python package missing — installing it alongside the binary")
         try:
