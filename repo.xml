@@ -4,14 +4,14 @@
     <title lang="EN">YouTube Music for LMS (NikolajChristensen fork)</title>
   </details>
   <plugins>
-    <plugin name="YouTubeMusic" version="1.5.1.7" minTarget="9.0" maxTarget="*">
+    <plugin name="YouTubeMusic" version="1.5.1.8" minTarget="9.0" maxTarget="*">
       <title lang="EN">YouTube Music</title>
       <desc lang="EN">Browse, search, and stream YouTube Music to your Squeezebox players.</desc>
-      <changes lang="EN">Diagnostic release: logs the actual reason when the faster direct-to-CDN download path fails, instead of a truncated message that cut off before the real error. Previously: on platforms where yt-dlp installs as a standalone binary (most Linux servers), the plugin now also installs the matching Python package so it can resolve stream links in-process and reuse the already-running Node helper, instead of spawning a fresh yt-dlp process and a fresh Node process for every track. Previously: a background prefetch no longer makes a track you're actually starting wait behind it for its stream link. Previously: fixes My Library and other personal playlists getting capped at around 100 tracks. Also: Artists and Albums are sorted alphabetically (albums by artist, then title), and all followed artists are listed, not just the first 500; fixes the server running out of memory on small machines when two tracks start at once; real section names in New Releases; new icon; "Go to artist" / "Go to album" in every track's menu; tracks no longer stop early when a download is cut off; Podcasts menu hidden. Based on upstream 1.5.1, plus download priority within 2 downloads.</changes>
+      <changes lang="EN">Faster track starts, now actually working: the plugin's faster in-process stream-link resolution was forcing a YouTube client ("web_embedded") that now needs a PO token it doesn't send, so the CDN rejected the direct download and it fell back to the old slow path every time. It no longer forces that client, matching what already worked reliably, and uses the matching headers for the direct download. Also installs the Python package needed for in-process resolution alongside the standalone yt-dlp binary (most Linux servers), instead of spawning a fresh yt-dlp and Node process per track. Previously: a background prefetch no longer makes a track you're actually starting wait behind it for its stream link. Previously: fixes My Library and other personal playlists getting capped at around 100 tracks. Also: Artists and Albums are sorted alphabetically (albums by artist, then title), and all followed artists are listed, not just the first 500; fixes the server running out of memory on small machines when two tracks start at once; real section names in New Releases; new icon; "Go to artist" / "Go to album" in every track's menu; tracks no longer stop early when a download is cut off; Podcasts menu hidden. Based on upstream 1.5.1, plus download priority within 2 downloads.</changes>
       <creator>schmij97, NikolajChristensen</creator>
       <category>musicservices</category>
-      <url>https://github.com/NikolajChristensen/lms-ytmusic/releases/download/v1.5.1.7/YouTubeMusic-1.5.1.7.zip</url>
-      <sha>b995f83404780ef5f3696b569dc166039d1390e3</sha>
+      <url>https://github.com/NikolajChristensen/lms-ytmusic/releases/download/v1.5.1.8/YouTubeMusic-1.5.1.8.zip</url>
+      <sha>ba8fb50abd6f1b2480a822231b8745ed5de08d29</sha>
     </plugin>
   </plugins>
 </extensions>
