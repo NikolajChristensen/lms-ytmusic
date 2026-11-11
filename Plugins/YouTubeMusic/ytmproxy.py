@@ -2265,7 +2265,13 @@ def _get_ydl():
                     'socket_timeout': 10,
                     'retries': 2,
                     'extractor_retries': 2,
-                    'extractor_args': {'youtube': {'player_client': ['web_embedded']}},
+                    # Don't force a specific client: web_embedded now sits
+                    # behind YouTube's "bind GVS PO Token to video ID"
+                    # experiment, and without a PO token the CDN 403s every
+                    # download - confirmed live (ytmproxy.log, 2026-11-11)
+                    # and reproduced locally. Let yt-dlp pick its own
+                    # default, same as the subprocess fallback below
+                    # already does (successfully) when this fails.
                     'cachedir': os.path.join(BIN_DIR, 'ytdlp_cache'),
                     'js_runtimes': js_runtimes,
                 }
@@ -2278,26 +2284,29 @@ def _get_ydl():
     return _ydl_instance
 
 def _get_audio_url(video_id):
-    """Use persistent YoutubeDL to extract audio URL. Returns URL or None."""
+    """Use persistent YoutubeDL to extract the audio URL and the HTTP
+    headers (User-Agent etc.) yt-dlp picked to match whichever client it
+    resolved the URL with. Returns (url, headers) or (None, None)."""
     try:
         ydl = _get_ydl()
         if ydl is None:
-            return None
+            return None, None
         url = f"https://music.youtube.com/watch?v={video_id}"
         info = ydl.extract_info(url, download=False)
         if not info:
-            return None
+            return None, None
         # Get the best audio URL
         if 'url' in info:
-            return info['url']
+            return info['url'], info.get('http_headers')
         # Try formats
         formats = info.get('formats', [])
         if formats:
-            return formats[-1].get('url')
-        return None
+            fmt = formats[-1]
+            return fmt.get('url'), fmt.get('http_headers')
+        return None, None
     except Exception as e:
         logging.warning("YDL extract failed for %s: %s", video_id, e)
-        return None
+        return None, None
 
 def _compile_ytdlp_bytecode():
     """Pre-compile yt-dlp Python source to .pyc bytecode for faster startup on slow ARM CPUs."""
@@ -2491,7 +2500,7 @@ def stream_audio(video_id, _replacing=None):
         with _urgent_extracting_lock:
             _urgent_extracting.add(video_id)
     try:
-        audio_url = _get_audio_url(video_id)
+        audio_url, _audio_headers = _get_audio_url(video_id)
     finally:
         if _urgent:
             with _urgent_extracting_lock:
@@ -2530,11 +2539,23 @@ def stream_audio(video_id, _replacing=None):
     # a download that ends early can be told apart from a finished one.
     expected = _url_duration(audio_url)
     if audio_url and not _is_hls and not _is_arm:
+        # Use the exact User-Agent/headers yt-dlp picked for whichever
+        # client it resolved this URL with - a mismatched User-Agent can
+        # get the CDN to reject the connection even when the URL itself
+        # is valid. Fall back to a generic set if extraction didn't
+        # supply any (e.g. the subprocess yt-dlp path never reaches here).
+        _headers = dict(_audio_headers or {})
+        _ua = _headers.pop("User-Agent", None) or \
+            "Mozilla/5.0 (Linux; Android 6.0; Nexus 5) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Mobile Safari/537.36"
+        _headers.setdefault("Accept", "*/*")
+        _headers.setdefault("Accept-Language", "en-us,en;q=0.5")
+        _header_str = "".join(f"{k}: {v}\r\n" for k, v in _headers.items())
+
         def ffmpeg_url_cmd(offset):
             cmd = [
                 _find_ffmpeg(), "-loglevel", "error",
-                "-user_agent", "Mozilla/5.0 (Linux; Android 6.0; Nexus 5) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Mobile Safari/537.36",
-                "-headers", "Accept: */*\r\nAccept-Language: en-us,en;q=0.5\r\n",
+                "-user_agent", _ua,
+                "-headers", _header_str,
                 # The CDN sometimes drops the connection part-way through;
                 # without these ffmpeg just ends there.
                 "-reconnect", "1", "-reconnect_streamed", "1",
