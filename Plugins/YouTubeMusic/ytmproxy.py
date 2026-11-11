@@ -1787,6 +1787,50 @@ def _platform_ytdlp_asset():
     return "yt-dlp", False
 
 
+def _install_ytdlp_wheel(release=None):
+    """Install the importable yt_dlp Python package into BIN_DIR, alongside
+    whatever yt-dlp binary is already there. Platforms with a standalone
+    yt-dlp binary (most Linux servers, including this one) have no package
+    to import, so _get_ydl() never creates the persistent YoutubeDL instance
+    - every track falls back to a fresh yt-dlp subprocess, which in turn
+    cold-starts a fresh Node process to solve YouTube's JS challenge, taking
+    several seconds neither cost needs to pay. Installing the wheel next to
+    the binary (used only for -U self-update) lets the persistent instance -
+    and its routing of JS challenges through the already-running Node
+    worker - actually activate. Returns (ok, message)."""
+    import urllib.request, zipfile, io
+    try:
+        if release is None:
+            api_url = "https://api.github.com/repos/yt-dlp/yt-dlp/releases/latest"
+            with urllib.request.urlopen(api_url, timeout=15) as resp:
+                release = json.loads(resp.read())
+        version = release["tag_name"]
+        wheel_url = None
+        for asset in release["assets"]:
+            if asset["name"].endswith(".whl"):
+                wheel_url = asset["browser_download_url"]
+                break
+        if not wheel_url:
+            # Convert tag format (2026.07.04) to PyPI format (2026.7.4)
+            pypi_ver = ".".join(str(int(x)) for x in version.split("."))
+            wheel_url = f"https://files.pythonhosted.org/packages/py3/y/yt-dlp/yt_dlp-{pypi_ver}-py3-none-any.whl"
+        with urllib.request.urlopen(wheel_url, timeout=60) as resp:
+            wheel_data = resp.read()
+        os.makedirs(BIN_DIR, exist_ok=True)
+        ytdlp_pkg = os.path.join(BIN_DIR, "yt_dlp")
+        # Clear any previous version first so a module removed upstream
+        # doesn't linger as stale, importable leftovers.
+        if os.path.isdir(ytdlp_pkg):
+            shutil.rmtree(ytdlp_pkg)
+        with zipfile.ZipFile(io.BytesIO(wheel_data)) as zf:
+            zf.extractall(BIN_DIR)
+        logging.info("yt_dlp Python package %s installed to %s", version, ytdlp_pkg)
+        return True, version
+    except Exception as e:
+        logging.warning("Could not install yt_dlp Python package: %s", e)
+        return False, str(e)
+
+
 def download_ytdlp():
     """Download the latest yt-dlp binary into the plugin directory.
     Returns (ok, message) tuple."""
@@ -1808,24 +1852,9 @@ def download_ytdlp():
             # Check if yt-dlp is already installed system-wide
             system_ytdlp = shutil.which("yt-dlp") or shutil.which("yt_dlp")
             # Always download wheel for ARM so it can be updated later
-            # Download wheel and install to BIN_DIR
-            logging.info("Downloading yt-dlp wheel for this platform")
-            wheel_url = None
-            for asset in release["assets"]:
-                if asset["name"].endswith(".whl"):
-                    wheel_url = asset["browser_download_url"]
-                    break
-            if not wheel_url:
-                # Try PyPI
-                # Convert tag format (2026.07.04) to PyPI format (2026.7.4)
-                pypi_ver = ".".join(str(int(x)) for x in version.split("."))
-                wheel_url = f"https://files.pythonhosted.org/packages/py3/y/yt-dlp/yt_dlp-{pypi_ver}-py3-none-any.whl"
-            with urllib.request.urlopen(wheel_url, timeout=60) as resp:
-                wheel_data = resp.read()
-            import zipfile, io
-            ytdlp_pkg = os.path.join(BIN_DIR, "yt_dlp")
-            with zipfile.ZipFile(io.BytesIO(wheel_data)) as zf:
-                zf.extractall(BIN_DIR)
+            ok, msg = _install_ytdlp_wheel(release)
+            if not ok:
+                return False, msg
             # Create wrapper script
             with open(wrapper, "w") as f:
                 f.write(f"#!/bin/sh\nPYTHONPATH={BIN_DIR}:$PYTHONPATH exec {sys.executable} -m yt_dlp \"$@\"\n")
@@ -1879,6 +1908,12 @@ def download_ytdlp():
             os.chmod(YTDLP_BIN, 0o755)
 
         logging.info("yt-dlp %s installed to %s", version, YTDLP_BIN)
+        # Also install the importable package alongside the binary so the
+        # persistent YoutubeDL instance can be used instead of spawning a
+        # subprocess (and a fresh Node process) per track. Best-effort: the
+        # binary install above already succeeded, so a failure here just
+        # means the subprocess fallback keeps being used, same as before.
+        _install_ytdlp_wheel(release)
         return True, version
 
     except Exception as e:
@@ -2837,6 +2872,12 @@ class _Handler(BaseHTTPRequestHandler):
                                 [ytdlp, "--version"],
                                 capture_output=True, text=True, timeout=10
                             )
+                            # Keep the importable package (used by the
+                            # persistent YoutubeDL instance) in step with
+                            # whatever version the binary just updated to -
+                            # also installs it the first time, on a host
+                            # that only had the standalone binary before.
+                            _install_ytdlp_wheel()
                             self._send_json({"status": "ok", "version": ver.stdout.strip()})
                         else:
                             self._send_json({"status": "error", "message": result.stderr.strip() or result.stdout.strip()})
@@ -3126,6 +3167,21 @@ def run(port=9876, log_level="INFO", codec="auto", log_file="", no_node_worker=F
                 logging.warning("yt-dlp auto-download failed: %s", msg)
         except Exception as e:
             logging.warning("yt-dlp auto-download error: %s", e)
+    # A host that got its yt-dlp binary before this package install was
+    # added (or whose platform only ships a standalone binary) has no
+    # importable yt_dlp — self-heal that now rather than waiting for the
+    # next "Update yt-dlp" click, so the persistent YoutubeDL instance
+    # activates on the next restart without any user action.
+    if _find_ytdlp() and not os.path.isdir(os.path.join(BIN_DIR, "yt_dlp")):
+        logging.info("yt_dlp Python package missing — installing it alongside the binary")
+        try:
+            ok, msg = _install_ytdlp_wheel()
+            if ok:
+                logging.info("yt_dlp Python package installed: %s", msg)
+            else:
+                logging.warning("yt_dlp Python package install failed: %s", msg)
+        except Exception as e:
+            logging.warning("yt_dlp Python package install error: %s", e)
     # Auto-install yt-dlp-ejs for JS challenge support
     _install_ytdlp_ejs()
     # Create yt-dlp cache dir for preprocessed player cache
